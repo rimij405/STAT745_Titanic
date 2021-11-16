@@ -1,0 +1,4 @@
+# Ignore everything but the gitkeep and gitignore
+*.*
+!*.gitkeep
+!*.gitignore
