@@ -71,7 +71,7 @@ get.coltypes <- function() {
         `Cabin` = readr::col_character(),
 
         # Port of embarkment.
-        `Embarked` = readr::col_factor()
+        `Embarked` = readr::col_factor(levels = c("S", "C", "Q"))
     ))
 }
 
@@ -198,8 +198,7 @@ impute.cabins <- function(cabin.model, df.passengers) {
 embarked.nb <- function(df.train) {
     # Prepare dataset with no missing embarkments.
     df.train.embarkments <- df.train %>%
-        dplyr::mutate(Embarked = as.character(Embarked)) %>%
-        dplyr::filter(!(Embarked == ""))
+        dplyr::filter(!is.na(Embarked))
 
     # Fit a model for predicting the Embarked
     return(e1071::naiveBayes(Embarked ~ Pclass + PassengerId + Fare + Ticket,
@@ -219,8 +218,7 @@ predict.embarkments <- function(embarked.model, df.missing) {
 impute.embarkments <- function(embarked.model, df.passengers) {
     # Select entries missing a embarked value.
     df.missing <- df.passengers %>%
-        dplyr::mutate(Embarked = as.character(Embarked)) %>%
-        dplyr::filter((Embarked == ""))
+        dplyr::filter(is.na(Embarked))
 
     # Make predictions and assign it back to the embarked field.
     df.embarkments <- df.missing %>%
@@ -228,9 +226,7 @@ impute.embarkments <- function(embarked.model, df.passengers) {
 
     # Return the modified dataset.
     df.passengers <- df.passengers %>%
-        dplyr::mutate(Embarked = as.character(Embarked)) %>%
-        dplyr::rows_update(df.embarkments) %>%
-        dplyr::mutate(Embarked = as.factor(Embarked))
+        dplyr::rows_update(df.embarkments)
 
     # Return output dataset with imputed embarkments.
     return(df.passengers)
@@ -297,12 +293,16 @@ prepare.data <- function() {
     return(df.clean)
 }
 
+## ---- e1071::naiveBayes Model ----
+
 #' Fit model on the dataset.
 Titanic.nb <- function(df.train) {
     # Create the fitted model.
     return(e1071::naiveBayes(Survived ~ .,
                              df.train, laplace = 1))
 }
+
+## ---- randomForest::randomForest Model ----
 
 #' Fit model on a RandomForest.
 Titanic.rf <- function(df.train) {
@@ -315,12 +315,36 @@ Titanic.rf <- function(df.train) {
     return(rf.model)
 }
 
+## ---- neuralnet::neuralnet Model ----
+
 #' Fit model on a neuralnet.
 Titanic.nn <- function(df.train) {
 
-    neuralnet::neuralnet()
+    # Create the formula for the neural network.
+    nn.features <- paste0(c(names(df.train %>% dplyr::select(-Survived))), collapse = " + ")
+    nn.formula <- paste0(c("Survived ~ ", nn.features), collapse = "")
+    nn.formula <- as.formula(nn.formula)
+
+    # Standard scaler.
+    normalize <- function(x) {
+        return((x - min(x)) / (max(x) - min(x)))
+    }
+
+    # Mutate formulas.
+    df.matrix <- model.matrix(~ 0 + Pclass + Sex + Age + SibSp + Parch + Ticket + Fare + Cabin + Embarked, df.train)
+    df.matrix %>%
+        dplyr::mutate(
+            Age = normalize(Age),
+            SibSp = normalize(SibSp),
+            Parch = normalize(Parch)
+            )
+
+    # Calculate the neuralnet and return it.
+    return(neuralnet::neuralnet(nn.formula, data = df.matrix, hidden = 3, threshold = 0.001))
 
 }
+
+## ---- Confusion Matrix ----
 
 #' Predict using model.
 predict.survival.table <- function(df.preds, df.truth) {
@@ -328,6 +352,8 @@ predict.survival.table <- function(df.preds, df.truth) {
     preds.labels <- ifelse(df.preds == 1, "Survived", "Perished")
     return(table(preds.labels, truth.labels))
 }
+
+## ---- Calculation of Training Metrics ----
 
 #' Calculate a training error rate.
 calc.train.metrics <- function(fit.model, df.train) {
@@ -341,6 +367,8 @@ calc.train.metrics <- function(fit.model, df.train) {
     ))
 }
 
+## ---- Generate Predictions (randomForest) ----
+
 #' Make test predictions with RandomForest package.
 predict.survival.rf <- function() {
 
@@ -352,6 +380,7 @@ predict.survival.rf <- function() {
 
     # Predict test data.
     rf.predictions <- predict(survival.rf, df.cleaned$test)
+
     # If NA, set to 0.
     df.predictions <- df.cleaned$test
     df.predictions %<>%
@@ -366,6 +395,8 @@ predict.survival.rf <- function() {
     return(df.predictions)
 }
 
+## ---- Generate Predictions (neuralnet) ----
+
 #' Make test predictions with NeuralNet package.
 predict.survival.nn <- function() {
 
@@ -373,6 +404,125 @@ predict.survival.nn <- function() {
     df.cleaned <- prepare.data()
 
     # Fit neural network with training data.
+    survival.nn <- Titanic.nn(df.cleaned$train)
 
+    # Compute the predictions.
+    nn.predictions <- neuralnet::compute(survival.nn, df.cleaned$test)
+
+    # If NA, set to 0.
+    df.predictions <- df.cleaned$test
+    df.predictions %<>%
+        dplyr::mutate(Survived = nn.predictions) %>%
+        dplyr::mutate(Survived = tidyr::replace_na(Survived, 0)) %>%
+        dplyr::select(c(PassengerId, Survived))
+
+    df.predictions %>%
+        readr::write_csv(file = here::here("data/nn_submission.v1.csv"))
+
+    # Output the predictions.
+    return(df.predictions)
 
 }
+
+## ---- Feature Selection ----
+
+#' Show correlation of features.
+show.correlations <- function(df.passengers) {
+
+    # Feature formula.
+    # features <- as.formula(paste0(c("~ 0", get.colnames()[-2]), collapse = " + "))
+
+    # Feature tibble.
+    df.features <- df.passengers %>% dplyr::select(where(is.numeric))
+
+    # Feature matrix.
+    # feature.matrix <- model.matrix(features, df.features)
+
+    # Get the correlation of features.
+    feature.corr <- round(cor(df.features), 2)
+    feature.p.mat <- ggcorrplot::cor_pmat(df.features)
+
+    # Display plot.
+    p <- corrplot::corrplot(feature.corr, method = 'pie', p.mat = feature.p.mat)
+    print(p)
+    return(p)
+}
+
+#' Show AOV of features against `Survived`.
+show.aov <- function(df.passengers) {
+
+    # List column names.
+    colnames <- names(df.passengers)
+    colnames <- colnames[-which(colnames == "Survived")]
+
+    # Get possible predictive features. Excludes response and `Name`.
+    aov.features <- paste0(colnames, collapse = " + ")
+
+    # Prepare formula for features.
+    aov.formula <- as.formula(paste0(c("as.numeric(Survived) ~ ", aov.features), collapse = ""))
+
+    # ANOVA on possible predictors (excludes `Name`).
+    aov.fit <- aov(aov.formula, data = df.passengers)
+
+    # ANOVA results.
+    print.noquote("ANOVA Results:")
+    print(summary(aov.fit))
+    return(aov.fit)
+
+}
+
+show.varImp <- function(df.passengers) {
+
+    # List column names.
+    colnames <- names(df.passengers)
+    colnames <- colnames[-which(colnames == "Survived")]
+
+    # Get possible predictive features. Excludes response and `Name`.
+    model.features <- paste0(colnames, collapse = " + ")
+
+    # Prepare formula for features.
+    model.formula <- as.formula(paste0(c("Survived ~ ", model.features), collapse = ""))
+
+    # Set up model control.
+    model.control <- caret::trainControl(method="repeatedcv", number=10, repeats=3)
+
+    # Set up hyper parameter tuning grid.
+    mtry <- sqrt(ncol(df.passengers))
+    model.grid <- expand.grid(.mtry = mtry)
+
+    # Fit the model.
+    metric <- "Accuracy"
+    set.seed(123)
+    model <- caret::train(model.formula, data=df.passengers, method="rf", metric="Accuracy", tuneGrid=model.grid, trControl=model.control)
+    importance <- caret::varImp(model, scale=FALSE)
+
+    print.noquote("Variable Importance:")
+    print.noquote(importance)
+    print(model)
+    print(summary(model))
+    return(model)
+}
+
+#' Reference: https://datascience.stackexchange.com/questions/893/how-to-get-correlation-between-two-categorical-variable-and-a-categorical-variab
+show.cramer.v <- function(category_a, category_b) {
+
+    feature.mat <- table(category_a, category_b)
+    chi2 <- chisq.test(feature.mat, correct=F)
+    chi2.results <- c(chi2$statistic, chi2$p.value)
+    cramer.v <- sqrt(chi2$statistic / sum(feature.mat))
+
+    print("ChiSquared Test Results")
+    print(sprintf("Statistic = %.2f", chi2$statistic))
+    print(sprintf("p.value = %.2f", chi2$p.value))
+    print(sprintf("Cramér V / Phi = %.2f", cramer.v))
+
+    return(list(
+        chi2 = chi2$statistic,
+        p.value = chi2$p.value,
+        cramer.v = cramer.v
+    ))
+
+}
+
+## ---- Feature Importance ----
+
