@@ -1,0 +1,492 @@
+---
+title: "Titanic (Kaggle Competition)"
+output: 
+  # Output as a previewable HTML Notebook.
+  html_notebook:
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    toc_depth: 3
+  # Output as an rmarkdown::pdf_document()
+  pdf_document:
+    keep_tex: true
+    highlight: tango
+    fig_caption: true
+    df_print: kable
+    toc: true
+    toc_depth: 3
+# pandoc -> pdfLaTeX rendering options:
+fontsize: 11pt
+geometry:
+  - margin=1in
+  - heightrounded
+documentclass: scrartcl
+papersize: a4
+urlcolor: violet
+toccolor: blue
+---
+
+```{r setup, include=FALSE}
+# Set the root directory.
+knitr::opts_knit$set(root.dir = here::here(""))
+
+# Set the chunk options.
+knitr::opts_chunk$set(
+    ## ---- Formatting Options ----
+    comment = "",
+    include = TRUE,
+    collapse = TRUE,
+    echo = TRUE,
+    strip.white = TRUE,
+    
+    ## ---- Output Options ----
+    message = TRUE,
+    warning = TRUE,
+    error = TRUE,
+    results = 'markup',
+    
+    ## ---- Display Options ----
+    fig.height = 8,
+    fig.width = 6
+)
+
+# Source loader file.
+source(here::here("R/loader.R"))
+load.data()
+```
+
+This report contains summaries about the Titanic dataset.
+
+## Setup
+
+Our investigation makes use of several R packages that made it easier to summarize, visualize, manipulate, model, and impute missing data. These packages are specified below.
+
+```{r load-packages, include=TRUE, echo=FALSE}
+library(magrittr) # Attached for the `%>%` (pipe) and `extract` functions.
+
+loadNamespace("renv")    # Project dependency tracker for collaboration.
+loadNamespace("here")    # Used for obtaining paths relative to project root.
+loadNamespace("readr")   # Tidyverse data reader.
+loadNamespace("tidyr")   # Tidyverse data wrangler.
+loadNamespace("dplyr")   # Tidyverse data manipulation.
+loadNamespace("ggplot2") # For plotting tidyverse data.
+loadNamespace("qqplotr") # For plotting quantile-quantile plots.
+loadNamespace("visdat")  # For visualization of data.
+loadNamespace("ltm")     # For EDA.
+loadNamespace("naniar")  # Handle NA values in a tabular format.
+loadNamespace("simputation")  # Missing data imputation.
+loadNamespace("e1071")   # For classification.
+loadNamespace("randomForest") # For classification.
+loadNamespace("neuralnet")    # For deep learning.
+```
+
+## Exploratory Data Analysis
+
+This section of the report is concerned with the steps taken to explore the training and test datasets, for the purposes of building intuition about the data prior to attempting any model fitting procedures. This part of the process helps us discover trends in the data, identify correlated variables, and engineer new predictive features that will help us improve our prediction accuracy.
+
+### Background
+
+On April 15, 1912, the RMS Titanic sank after a collision with an iceberg. The tragedy resulted in the death of 1502 out of the 2224 passengers and crew. In the decades following, historians compiled information about the passengers (eg., names, ages, genders, socio-economic class, etc.), and discovered that some people were more likely to survive based on these factors. This data has been published as part of a [kaggle competition](https://www.kaggle.com/c/titanic/overview); our team will submit our work under the name `STAT745_RIT_Team2`.
+
+The competition dataset uses the information from a total of 1309 unique passengers. The passengers dataset has been split into a labelled training subset and an unlabelled test subset, which we explore below.
+
+#### Training Subset (`train.csv`)
+
+The training subset contains the labelled dataset (n = 891), with 12 columns (i.e., 11 features and 1 response).
+
+```{r eda-train-overview}
+dplyr::glimpse(Titanic.train)
+```
+
+Below is a random sampling of the subset.
+
+```{r eda-train-sample}
+sample.df(Titanic.train, 5)
+```
+
+#### Testing Subset (`test.csv`)
+
+The training subset contains the unlabelled dataset (n = 418), with 11 columns (i.e., 11 features with no response).
+
+```{r eda-test-overview}
+dplyr::glimpse(Titanic.test)
+```
+
+Below is a random sampling of the subset.
+
+```{r eda-test-sample}
+sample.df(Titanic.test, 5)
+```
+### Response Overview
+
+The response column present in the training subset is a factor named `Survived`.
+
+```{r eda-response}
+passenger_survived = (Titanic.train$Survived == 1)
+(passenger_survival = table(passenger_survived, dnn = c("Passenger Survived?")))
+passenger_survival / sum(passenger_survival)
+```
+
+Approximately 61% of the passengers named in the training subset perished (n = 549) during the sinking of the RMS Titanic. The remaining 38% of the passengers in the training subset survived (n = 342).
+
+### Feature Overview
+
+There are 11 predictors present within this dataset. The following sections will discuss properties of the features as they relate to the response or to other predictors in the dataset.
+
+### `PassengerId` (Index)
+
+`PassengerId` is a numeric, index variable that identifies a unique passenger in the dataset.
+
+Each identifier is guaranteed to be unique:
+
+```{r eda-count-passengerid}
+Titanic.df %>%
+    dplyr::group_by(Subset) %>%
+    dplyr::summarise(`Unique` = dplyr::n_distinct(PassengerId), .groups = "drop") %>%
+    dplyr::mutate(Proportion = round(`Unique` / sum(`Unique`), 2),
+                  Total = sum(`Unique`))
+```
+
+While `PassengerId` can be considered a numeric value, it really represents the index of a particular record.
+
+<!-- 
+    - Correlation Reference: https://stats.stackexchange.com/questions/484299/how-to-check-the-correlation-between-categorical-and-numeric-independent-variabl
+    - Visualization: http://www.sthda.com/english/wiki/correlation-test-between-two-variables-in-r#visualize-your-data-using-scatter-plots 
+-->
+
+Since `Survived` is a dichotomous categorical variable, we can calculate the [point-biserial correlation coefficient](https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient) in order to show that `PassengerId` is not significantly correlated. The point-biserial correlation is a particular case of Pearson's product-moment correlation.
+
+```{r eda-corr-passengerid}
+cor.test(Titanic.train$PassengerId, as.numeric(Titanic.train$Survived))
+```
+
+We can also perform the two-sample Wilcoxon rank sum test to see if there's a change in `Survived` based on `PassengerId`.
+
+```{r eda-wilcox-passengerid}
+alive <- Titanic.train %>% dplyr::filter(Survived == 1)
+dead <- Titanic.train %>% dplyr::filter(Survived == 0)
+wilcox.test(alive %>% dplyr::pull(PassengerId), dead %>% dplyr::pull(PassengerId))
+```
+
+### `Pclass`
+
+`Pclass` is a factor described as, "a proxy for socio-economic status (SES)". 
+
+There are three levels used in this factor: `1` for Upper class, `2` for Middle class, and `3` for Lower class.
+
+```{r eda-count-pclass}
+Titanic.df %>%
+    dplyr::group_by(Subset, Pclass) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+We see that, in the dataset, a touch more than half of the passengers are in the Lower class (`Pclass` == 3), about a quarter of the passengers are in the Upper class (`Pclass` == 1), and a remaining fifth of the passengers are from the Middle class (`Pclass` == 2). We see that the subsets provided by the competition have roughly equal distributions of `Pclass` between the training and testing data.
+
+```{r eda-missing-pclass}
+Titanic.train %>% dplyr::select(Pclass) %>% naniar::n_miss()
+```
+We can also see that no `Pclass` entries are missing.
+
+As `Pclass` and the response `Survived` are both categorical factors, we can perform a `Chi-Square` test to determine if `Pclass` is independent from `Survived`:
+
+- Null hypothesis: Variables are independent.
+- Alternative hypothesis: Variables are correlated in some way.
+
+```{r eda-chisq-pclass}
+chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Pclass, Survived)), correct=F)
+list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```
+
+According to the Chi-Squared test, `Pclass` has some kind of correlation with `Survived`.
+
+```{r eda-corr-pclass}
+kt <- kruskal.test(Titanic.train$Pclass, Titanic.train$Survived)
+print.noquote(sprintf("%s on %s", kt$method, kt$data.name))
+print.noquote(sprintf("X-squared = %s (df %s)", round(kt$statistic, 2), kt$parameter))
+print.noquote(sprintf("p-value = %s (Significant? %s)", kt$p.value, kt$p.value < 0.05))
+```
+
+### `Name`
+
+`Name` is a text feature containing the passenger name and titles.
+
+```{r eda-sample-name}
+sample.df(Titanic.train %>% dplyr::select(Name), 5)
+```
+
+```{r eda-count-name}
+Titanic.df %>%
+    dplyr::group_by(Subset) %>%
+    dplyr::summarise(`Unique` = dplyr::n_distinct(Name), .groups = "drop") %>%
+    dplyr::mutate(Proportion = round(`Unique` / sum(`Unique`), 2),
+                  Total = sum(`Unique`))
+```
+
+These, like `PassengerId`, are typically different for each passenger but are not guaranteed to be unique. Theoretically, two passengers could have the same exact name and title, despite the rarity of the occurrence. For this reason, `Name` is not used as an index variable.
+ 
+That said, `Name` carries with it some degree of additional context. A person's first name and surname may be correlated with a particular region, class, or origin. A person's first name may additionally be correlated with one's age. Finally, a person's title can indicate martial status (ie. "Miss." vs. "Mrs.") and stature (ie., "Major.", "Dr."). These are all details that *may* impact one's ability to secure a spot on the rescue boats.
+
+```{r eda-chisq-name}
+chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Name, Survived)), correct=F)
+list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```
+
+To confirm our intuition, a `Chi-Square` test between `Name` and `Survived` suggests there is no correlation between the variable and the response.
+
+In order to determine common details between passengers, we'll want to engineer additional features from this category, such as `First Name`, `Family Name`, `Title`, and `Martial Status`.
+
+### `Sex`
+
+The `Sex` predictor demarcates the listed gender (constrained here to `male` and `female`) for each passenger.
+
+```{r eda-count-gender}
+Titanic.df %>%
+    dplyr::group_by(Subset, Sex) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+```{r eda-missing-gender}
+Titanic.train %>% dplyr::select(Sex) %>% naniar::n_miss()
+```
+We can also see that no `Sex` entries are missing.
+
+```{r eda-chisq-gender}
+chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Sex, Survived)), correct=F)
+list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```
+
+We can see from a `Chi-Square` test that the `Sex` variable is significantly correlated with the `Survived` response.
+
+```{r eda-chisq-gender-class}
+chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Sex, Pclass)), correct=F)
+list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```
+
+We can see from another test, that `Sex` is also correlated with the `Pclass` variable.
+
+### `Age`
+
+`Age` is a numeric variable representing the age of a passenger at the time of the shipwreck. If the age is less than 1, a fractional representation is provided. If the age is estimated, the value is provided in the form of `xx.5`.
+
+```{r eda-count-age}
+Titanic.df %>%
+    dplyr::mutate(Age_Range = cut(Age, breaks = c(-Inf, 1, 17, 30, 50, Inf), right = TRUE, ordered_result = TRUE)) %>%
+    dplyr::group_by(Subset, Age_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+```{r eda-missing-age}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Age) %>% naniar::miss_var_summary()
+```
+
+We see that approximately 20% of both the train and test subsets have samples with missing ages. There are 177 passengers with no age estimated or listed in the training subset and 86 in the test subset. A quick look at the age ranges also suggests roughly equal distributions in both subsets for the different age ranges, when age is present.
+
+A little more than a third of the passengers are young adults between the ages of 17 and 30. About a quarter are adults who are between the ages of 30 and 50.
+
+```{r eda-normal-age, fig.width=5, fig.height=5}
+Titanic.train %>%
+    ggplot2::ggplot(ggplot2::aes(sample = Age)) +
+    qqplotr::geom_qq_band(na.rm = TRUE, conf = 0.95) +
+    qqplotr::stat_qq_point(na.rm = TRUE, alpha = 0.5) +
+    qqplotr::stat_qq_line(na.rm = TRUE) +
+    ggplot2::labs(title = "Normal Quantile Plot of Age", x = "Theoretical Quantiles", y = "Sample Quantiles")
+```
+
+We can see that `Age` is approximately normally distributed, with some tails towards the end.
+
+We can also check to see if age is correlated with the respnose:
+
+```{r eda-corr-age}
+cor.test(Titanic.train$Age, as.numeric(Titanic.train$Survived))
+```
+The correlation test suggests that `Age` has a statistically significant negative correlation with survival (p = 0.039) at a significance level of $\alpha = 0.05$.
+
+```{r eda-corr-age-sex}
+cor.test(Titanic.train$Age, as.numeric(Titanic.train$Sex))
+```
+We can see that `Age` is also negatively correlated with the passenger gender reported in `Sex`. 
+
+We can also the Kruskal-Wallis test to see if there's a change in `Pclass` based on `Age`.
+
+```{r eda-corr-age-pclass}
+kt <- kruskal.test(Titanic.train$Age, Titanic.train$Fare)
+print.noquote(sprintf("%s on %s", kt$method, kt$data.name))
+print.noquote(sprintf("X-squared = %s (df %s)", round(kt$statistic, 2), kt$parameter))
+print.noquote(sprintf("p-value = %s (Significant? %s)", kt$p.value, kt$p.value < 0.05))
+```
+
+
+
+### `SibSp`
+
+`SibSp` is a numeric variable that counts the number of siblings and spouses a passenger has aboard the Titanic during the time of the shipwreck. Siblings are defined as being a brother, sister, stepbrother, or stepsister. Spouses are defined as husband and wife, with mistresses and fiances being ignored. 
+
+```{r eda-count-sibsp}
+Titanic.df %>%
+    dplyr::mutate(SibSp_Range = cut(SibSp, breaks = c(-Inf, 0, Inf), labels = c("No Siblings/Spouses", "1 or More Siblings/Spouses"), right = TRUE, ordered_result = TRUE)) %>%
+    dplyr::group_by(Subset, SibSp_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+```{r eda-missing-sibsp}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(SibSp) %>% naniar::miss_var_summary()
+```
+
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+### `Parch`
+
+`Parch` is a numeric variable that counts the number of siblings and spouses a passenger has aboard the Titanic during the time of the shipwreck. Siblings are defined as being a brother, sister, stepbrother, or stepsister. Spouses are defined as husband and wife, with mistresses and fiances being ignored. 
+
+
+```{r eda-count-parch}
+Titanic.df %>%
+    dplyr::mutate(Parch_Range = cut(Parch, breaks = c(-Inf, 0, Inf), labels = c("No Parents/Children", "1 or More Parents/Children"), right = TRUE, ordered_result = TRUE)) %>%
+    dplyr::group_by(Subset, Parch_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+```{r eda-missing-parch}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Parch) %>% naniar::miss_var_summary()
+```
+
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+### `Ticket`
+
+`Ticket` is a text feature containing a non-contiguous ticket identifier. These are non-unique, as repetitions indicate that passengers were sharing a cabin or travelling together on a joint ticket.
+
+```{r eda-sample-ticket}
+sample.df(Titanic.train %>% dplyr::select(Ticket), 10)
+```
+
+```{r eda-ticket-content}
+Titanic.df %>%
+    dplyr::select(PassengerId, Name, Ticket, Subset) %>%
+    dplyr::group_by(Subset, Ticket) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+    dplyr::arrange(desc(Count))
+```
+
+Seeing as there are 7 ticket holders for ticket number `1601`, we can see the following information:
+
+```{r eda-ticket-holders}
+Titanic.train %>% dplyr::filter(Ticket == "1601")
+```
+
+We can see this is a joint ticket, because the fare is the same. The ticket can be a proxy for origin in a way that port of embarkment is not. The passenger names imply that these passengers may have been of Asian descent. Could they have possibly faced descrimination on the Titanic in 1912 that could have impacted their survival?
+
+[In 2014, China was the second most popular incidence for the last name of `Bing`](https://forebears.io/surnames/bing)
+https://forebears.io/surnames/lang
+
+```{r eda-missing-ticket}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Ticket) %>% naniar::miss_var_summary()
+```
+
+```{r eda-special-ticket}
+Titanic.df %>% dplyr::filter(Ticket == "LINE")
+```
+
+Here we can see that the special `LINE` ticket is a free ride for a set of people of various, unrelated people. Further research indicates this was a special ticket given to a set of American Line employees travelling to New York via the RMS Titanic. The tickets were paid for by the company, hence the free fare.
+
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+### `Fare`
+
+```{r eda-missing-fare}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Fare) %>% naniar::miss_var_summary()
+```
+
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+### `Cabin`
+
+```{r eda-missing-cabin}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Age) %>% naniar::miss_var_summary()
+```
+
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+### `Embarked`
+
+```{r eda-missing-embarked}
+Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Embarked) %>% naniar::miss_var_summary()
+```
+TODO: What is it?
+TODO: Count of unique values?
+TODO: Is any data missing? Training subset? Test subset?
+TODO: How does it effect the response?
+TODO: Correlation with other features?
+
+## Data Imputation
+
+### `Age` (imputation by `Pclass`?)
+
+TODO: What is missing?
+
+### `Cabin` (imputation by `randomForest`?)
+
+### `Embarked` (imputation by `Pclass`?)
+
+## Feature Engineering
+
+### `First Name` (extracted from `Name`)
+
+### `Family Name` (extracted from `Name`)
+
+### `Middle Name` (extracted from `Name`)
+
+### `Title` (extracted from `Name`)
+
+### `Martial Status` (extracted from `Name`)
+
+TODO: Summary/Correlation.
+
+### `AgeRange` (extracted from `Age`)
+
+Factor representing if the passenger is an infant, child, or adult. Useful for interpretation.
+
+TODO: Summary/Correlation.
+
+### `withParent` (extracted from `AgeRange` and `Parch`)
+
+If `InfChiAd` is either 1 or 2 and if Parch is 0.... child is with nanny.
+
+### `Deck` (extracted from `Cabin`)
+
+### `TicketPrefix` (extracted from `Ticket`)
+
+### `TicketNumber` (extracted from `Ticket`)
+
+## Modelling Passenger Survival
+
+### Logistic Regression (with `glm`)
+
+### Feature Importance (with `randomForest`)
+
+### Classification Tuning (with Cross-Validation)
