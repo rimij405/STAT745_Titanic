@@ -44,7 +44,7 @@ get.coltypes <- function() {
 
         # Ticket class. 1 = 1st, 2 = 2nd, 3 = 3rd.
         # Proxy for socio-economic status (SES).
-        `Pclass` = readr::col_factor(),
+        `Pclass` = readr::col_factor(levels = c("1", "2", "3")),
 
         # Name of the passenger.
         `Name` = readr::col_character(),
@@ -87,7 +87,7 @@ load.data.train <- function() {
         col_names = col_names,
         col_types = col_types,
         skip = 1
-    )
+    ) %>% dplyr::mutate(Survived = factor(Survived, labels = c("Died", "Survived")))
     return(Titanic.train)
 }
 

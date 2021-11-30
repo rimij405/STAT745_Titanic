@@ -1,0 +1,327 @@
+---
+title: "Titanic (Kaggle Competition): Feature Engineering"
+output: 
+  # Output as a previewable HTML Notebook.
+  html_notebook:
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    toc_depth: 3
+  # Output as an rmarkdown::pdf_document()
+  pdf_document:
+    keep_tex: true
+    highlight: tango
+    fig_caption: true
+    df_print: kable
+    toc: true
+    toc_depth: 3
+# pandoc -> pdfLaTeX rendering options:
+fontsize: 11pt
+geometry:
+  - margin=1in
+  - heightrounded
+documentclass: scrartcl
+papersize: a4
+urlcolor: violet
+toccolor: blue
+---
+
+## Feature Engineering
+### `Deck` (extracted from `Cabin`)
+
+### `TicketPrefix` (extracted from `Ticket`)
+
+### `TicketNumber` (extracted from `Ticket`)
+
+
+### `Fare_Rounded` (extracted from `Fare`)
+
+#### Summary
+
+```{r feature-fare-range}
+Titanic.df %<>%
+    dplyr::mutate(Fare_Range = cut(Fare, 
+                                    breaks = c(-Inf, seq(0, 550, by = 50), Inf),
+                                    right = TRUE,
+                                    ordered_result = TRUE),
+                  Fare_Rounded = round(Fare / 100, 1) * 100)
+
+Titanic.train <- Titanic.df %>%
+  dplyr::filter(Subset == "Train") %>%
+  dplyr::select(-Subset)
+
+Titanic.test <- Titanic.df %>%
+  dplyr::filter(Subset == "Test") %>%
+  dplyr::select(-c(Survived, Subset))
+```
+
+```{r feature-fare-range-response}
+Titanic.df %>%
+    dplyr::group_by(Subset, Fare_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+
+Titanic.df %>%
+    dplyr::group_by(Subset, Fare_Rounded) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+```{r feature-summary-fare-range}
+Titanic.df %>%
+  sjstats::means_by_group("Fare_Range", "Survived")
+
+Titanic.df %>%
+  sjstats::means_by_group("Fare_Rounded", "Survived")
+```
+
+### `InfChiAdu` (extracted from `Age`)
+
+Factor representing if the passenger is an infant, child, or adult. Useful for interpretation and helpful for additional feature engineering.
+
+### `WithParent` (extracted from `InfChiAdu` and `Parch`)
+
+If `InfChiAd` is either 1 or 2 and if Parch is 0.... child is with nanny.
+
+### `WithChild` (extracted from `InfChiAdu` and `Ticket`)
+
+### `SibSp_Range` (extracted from `SibSp`)
+
+Our previous review of `SibSp` suggested that more than 90% of the observed sample has 0 siblings and/or spouses on board at the time of the shipwreck. Can we filter this down into a smaller amount of factors that better describe outcomes?
+
+#### Summary
+
+```{r feature-sibsp-range}
+Titanic.df %<>%
+    dplyr::mutate(SibSp_Range = cut(SibSp, 
+                                    breaks = c(-Inf, 0, 1, Inf),
+                                    labels = c("0", 
+                                               "1", 
+                                               "2+"),
+                                    right = TRUE,
+                                    ordered_result = TRUE))
+Titanic.train <- Titanic.df %>%
+  dplyr::filter(Subset == "Train") %>%
+  dplyr::select(-Subset)
+
+Titanic.test <- Titanic.df %>%
+  dplyr::filter(Subset == "Test") %>%
+  dplyr::select(-c(Survived, Subset))
+```
+
+```{r feature-sibsp-range-response}
+Titanic.df %>%
+    dplyr::group_by(Subset, SibSp_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+#### By Response
+
+```{r eda-kruskal-sibsp-range-response}
+(sjstats::means_by_group(Titanic.df, "Survived", "SibSp_Range"))
+(kt <- kruskal.test(Survived ~ SibSp_Range, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-crosstab-sibsp-range-response}
+TSRS <- xtabs(~ Survived + SibSp_Range, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSRS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSRS), 2))
+```
+
+```{r eda-mosaic-sibsp-range-response}
+vcd::mosaic(TSRS, shade=TRUE, legend=TRUE)
+vcd::assoc(TSRS, shade=TRUE)
+```
+
+#### By `Sex`
+
+```{r eda-kruskal-sibsp-range-gender}
+(sjstats::means_by_group(Titanic.df, "SibSp_Range", "Sex"))
+(kt <- kruskal.test(Sex ~ SibSp_Range, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-crosstab-sibsp-range-gender}
+TSRG <- xtabs(~ Sex + SibSp_Range, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSRG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSRG), 2))
+```
+
+```{r eda-mosaic-sibsp-range-gender}
+vcd::mosaic(TSRG, shade=TRUE, legend=TRUE)
+vcd::assoc(TSRG, shade=TRUE)
+```
+
+#### By `Age`
+
+```{r eda-kruskal-sibsp-range-age}
+(sjstats::means_by_group(Titanic.df, "Age", "SibSp_Range"))
+(r <- cor.test(~ Age + as.numeric(SibSp_Range), data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-sibsp-range-age, fig.width=6}
+Titanic.df %>%
+  dplyr::select(Subset, Survived, SibSp_Range, Age) %>%
+  ggplot2::ggplot(ggplot2::aes(x = SibSp_Range, y = Age, fill = SibSp_Range, group = SibSp_Range)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Age by Sibling/Spouse Count", x = "Number of Siblings and/or Spouses", y = "Passenger Age")
+```
+
+
+### `Parch_Range` (extracted from `Parch`)
+
+#### Summary
+
+```{r feature-parch-range}
+Titanic.df %<>%
+    dplyr::mutate(Parch_Range = cut(Parch, 
+                                    breaks = c(-Inf, 0, 1, Inf),
+                                    labels = c("0", 
+                                               "1", 
+                                               "2+"),
+                                    right = TRUE,
+                                    ordered_result = TRUE))
+Titanic.train <- Titanic.df %>%
+  dplyr::filter(Subset == "Train") %>%
+  dplyr::select(-Subset)
+
+Titanic.test <- Titanic.df %>%
+  dplyr::filter(Subset == "Test") %>%
+  dplyr::select(-c(Survived, Subset))
+```
+
+```{r feature-parch-range-response}
+Titanic.df %>%
+    dplyr::group_by(Subset, Parch_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
+```
+
+#### By Response
+
+```{r eda-kruskal-parch-range-response}
+(sjstats::means_by_group(Titanic.df, "Survived", "Parch_Range"))
+(kt <- kruskal.test(Survived ~ Parch_Range, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-crosstab-parch-range-response}
+TPCS <- xtabs(~ Survived + Parch_Range, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCS), 2))
+```
+
+```{r eda-mosaic-parch-range-response}
+vcd::mosaic(TPCS, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCS, shade=TRUE)
+```
+
+#### By `Sex`
+
+```{r eda-kruskal-parch-range-gender}
+(sjstats::means_by_group(Titanic.df, "Parch_Range", "Sex"))
+(kt <- kruskal.test(Sex ~ Parch_Range, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-crosstab-parch-range-gender}
+TPCG <- xtabs(~ Sex + Parch_Range, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCG), 2))
+```
+
+```{r eda-mosaic-parch-range-gender}
+vcd::mosaic(TPCG, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCG, shade=TRUE)
+```
+
+#### By `Age`
+
+```{r eda-kruskal-parch-range-age}
+(sjstats::means_by_group(Titanic.df, "Age", "Parch_Range"))
+(r <- cor.test(~ Age + as.numeric(Parch_Range), data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-parch-range-age, fig.width=6}
+Titanic.df %>%
+  dplyr::select(Subset, Survived, Parch_Range, Age) %>%
+  ggplot2::ggplot(ggplot2::aes(x = Parch_Range, y = Age, fill = Parch_Range, group = Parch_Range)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Age by Parent/Child Count", x = "Number of Parents and/or Children", y = "Passenger Age")
+```
+
+
+### Latent Features in `Name`
+
+```{r feature-name}
+# Prepare data frame for extraction from the `Name` feature.
+(Titanic.name <- dplyr::select(Titanic.df, PassengerId, Name, Subset))
+```
+
+```{r feature-name-explore}
+# PRCE format Regex for formatting the names.
+Titanic.name.format <- "^(.+?(?=,))(?>,\\s+)(.+?\\.)(?>\\s+)(.*?(?=\\t|$|\\s\\())(?|(?=\\t|$)()(?:.*?(?=$))|(?:\\s\\(?)(.*?(?=\\)))(?:.*?(?=$)))"
+Titanic.name.matches <- regexec(
+    pattern = Titanic.name.format,
+    text = Titanic.name$Name,
+    perl = TRUE # For PRCE conditionals.
+)
+
+# Generate the matches.
+Titanic.name.components <- c("Source", "Surname", "Title", "Given Name (B)", "Given Name (A)")
+(Titanic.name.features <- Titanic.name %>%
+    dplyr::pull(Name) %>%
+    regmatches(Titanic.name.matches) %>%
+    as.data.frame(row.names = Titanic.name.components, col.names = Titanic.name$PassengerId) %>%
+    tibble::rownames_to_column(var = "Component") %>%
+    tidyr::pivot_longer(cols = -Component, names_to = "PassengerId", values_to = "Value") %>%
+    dplyr::arrange(PassengerId, desc(Component)) %>%
+    dplyr::mutate(PassengerId = as.integer(sub("X", "", PassengerId))))
+```
+
+
+### `Title` (extracted from `Name`)
+
+```{r feature-name-title-extract}
+# Prepare data frame for extraction from the `Name` feature.
+
+
+
+```
+
+### `Martial Status` (extracted from `Name`)
+
+
+### `Forename` (extracted from `Name`)
+
+### `Middlename` (extracted from `Name`)
+
+<!-- Additional names besides first name -->
+
+### `Surname` (extracted from `Name`)
+

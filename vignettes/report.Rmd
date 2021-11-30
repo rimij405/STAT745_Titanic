@@ -1,5 +1,5 @@
 ---
-title: "Titanic (Kaggle Competition)"
+title: "Titanic (Kaggle Competition): EDA"
 output: 
   # Output as a previewable HTML Notebook.
   html_notebook:
@@ -47,7 +47,7 @@ knitr::opts_chunk$set(
     results = 'markup',
     
     ## ---- Display Options ----
-    fig.height = 8,
+    fig.height = 4,
     fig.width = 6
 )
 
@@ -72,8 +72,12 @@ loadNamespace("tidyr")   # Tidyverse data wrangler.
 loadNamespace("dplyr")   # Tidyverse data manipulation.
 loadNamespace("ggplot2") # For plotting tidyverse data.
 loadNamespace("qqplotr") # For plotting quantile-quantile plots.
+loadNamespace("ggmosaic") # For plotting mosaic plots.
 loadNamespace("visdat")  # For visualization of data.
 loadNamespace("ltm")     # For EDA.
+loadNamespace("sjstats") # For EDA.
+loadNamespace("vcd")     # For EDA.
+loadNamespace("skimr")   # For finding statistical summaries.
 loadNamespace("naniar")  # Handle NA values in a tabular format.
 loadNamespace("simputation")  # Missing data imputation.
 loadNamespace("e1071")   # For classification.
@@ -91,12 +95,19 @@ On April 15, 1912, the RMS Titanic sank after a collision with an iceberg. The t
 
 The competition dataset uses the information from a total of 1309 unique passengers. The passengers dataset has been split into a labelled training subset and an unlabelled test subset, which we explore below.
 
+```{r eda-overview}
+writeLines(sprintf("Number of duplicated rows in `train.csv`: %i", 
+                   duplicated.data.frame(Titanic.train) %>% sum()))
+writeLines(sprintf("Number of duplicated rows in `test.csv`: %i", 
+                   duplicated.data.frame(Titanic.test) %>% sum()))
+```
+
 #### Training Subset (`train.csv`)
 
 The training subset contains the labelled dataset (n = 891), with 12 columns (i.e., 11 features and 1 response).
 
 ```{r eda-train-overview}
-dplyr::glimpse(Titanic.train)
+skimr::skim(Titanic.train)
 ```
 
 Below is a random sampling of the subset.
@@ -110,7 +121,7 @@ sample.df(Titanic.train, 5)
 The training subset contains the unlabelled dataset (n = 418), with 11 columns (i.e., 11 features with no response).
 
 ```{r eda-test-overview}
-dplyr::glimpse(Titanic.test)
+skimr::skim(Titanic.test)
 ```
 
 Below is a random sampling of the subset.
@@ -118,62 +129,85 @@ Below is a random sampling of the subset.
 ```{r eda-test-sample}
 sample.df(Titanic.test, 5)
 ```
+
 ### Response Overview
 
-The response column present in the training subset is a factor named `Survived`.
+The response column present in the training subset is a factor named `Survived`. Since `Survived` is a dichotomous categorical variable, the formal problem domain is that of a binary classification problem. We want to predict `Survived` as a result of the direct and latent features in the dataset.
 
-```{r eda-response}
-passenger_survived = (Titanic.train$Survived == 1)
-(passenger_survival = table(passenger_survived, dnn = c("Passenger Survived?")))
-passenger_survival / sum(passenger_survival)
+```{r eda-count-response}
+Titanic.train %>%
+  dplyr::group_by(Survived) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
 
-Approximately 61% of the passengers named in the training subset perished (n = 549) during the sinking of the RMS Titanic. The remaining 38% of the passengers in the training subset survived (n = 342).
+```{r eda-bar-response, fig.width=5}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Survived, fill = Survived)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(c = 40) + 
+  ggplot2::labs(title = "Count of Passengers by Survival Outcome", x = "Survival Outcome", y = "Passengers") +
+  ggplot2::theme(legend.position="none")
+```
+
+Approximately $62$% of the passengers named in the training subset perished ($n = 549$) during the sinking of the RMS Titanic. The remaining $38$% of the passengers in the training subset survived ($n = 342$). We should consider additional techniques to make up for the imbalanced class in the dataset's response.
 
 ### Feature Overview
 
-There are 11 predictors present within this dataset. The following sections will discuss properties of the features as they relate to the response or to other predictors in the dataset.
+There are $11$ predictors present within this dataset. The following sections will discuss properties of the features as they relate to the response or to other predictors in the dataset.
 
 ### `PassengerId` (Index)
 
-`PassengerId` is a numeric, index variable that identifies a unique passenger in the dataset.
+`PassengerId` is a numeric, index variable that identifies a unique passenger in the dataset. 
+
+We verified that there are no entries with a missing `PassengerId`:
+
+```{r eda-missing-passengerid}
+Titanic.df %>% dplyr::select(Subset, PassengerId) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
 
 Each identifier is guaranteed to be unique:
 
 ```{r eda-count-passengerid}
 Titanic.df %>%
-    dplyr::group_by(Subset) %>%
-    dplyr::summarise(`Unique` = dplyr::n_distinct(PassengerId), .groups = "drop") %>%
-    dplyr::mutate(Proportion = round(`Unique` / sum(`Unique`), 2),
-                  Total = sum(`Unique`))
+  dplyr::group_by(Subset) %>%
+  dplyr::summarise(Unique = dplyr::n_distinct(PassengerId), .groups = "drop") %>%
+  dplyr::mutate(Proportion = round(Unique / sum(Unique), 2),
+                Total = sum(Unique))
 ```
 
-While `PassengerId` can be considered a numeric value, it really represents the index of a particular record.
+We can see that the train/test subsets have been generated with a 68%/32% split. `PassengerId` represents the index of a particular record, so we want to assume that it is not affiliated with the response. 
 
-<!-- 
-    - Correlation Reference: https://stats.stackexchange.com/questions/484299/how-to-check-the-correlation-between-categorical-and-numeric-independent-variabl
-    - Visualization: http://www.sthda.com/english/wiki/correlation-test-between-two-variables-in-r#visualize-your-data-using-scatter-plots 
--->
-
-Since `Survived` is a dichotomous categorical variable, we can calculate the [point-biserial correlation coefficient](https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient) in order to show that `PassengerId` is not significantly correlated. The point-biserial correlation is a particular case of Pearson's product-moment correlation.
+To confirm this assumption, we can verify that `PassengerId` is not associated with the response. We can use the [point-biserial correlation coefficient](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/point-biserial-correlation/), a particular case of Pearson's product-moment correlation.
 
 ```{r eda-corr-passengerid}
-cor.test(Titanic.train$PassengerId, as.numeric(Titanic.train$Survived))
+(ct <- cor.test(Titanic.train$PassengerId, Titanic.train$Survived %>% as.numeric()))
+writeLines(sprintf("Significant (P-value < 0.05)? %s", ct$p.value < 0.05))
 ```
-
-We can also perform the two-sample Wilcoxon rank sum test to see if there's a change in `Survived` based on `PassengerId`.
-
-```{r eda-wilcox-passengerid}
-alive <- Titanic.train %>% dplyr::filter(Survived == 1)
-dead <- Titanic.train %>% dplyr::filter(Survived == 0)
-wilcox.test(alive %>% dplyr::pull(PassengerId), dead %>% dplyr::pull(PassengerId))
-```
+We see there is no statistically significant correlation between `PassengerId` and `Survived`. 
 
 ### `Pclass`
 
-`Pclass` is a factor described as, "a proxy for socio-economic status (SES)". 
+`Pclass` is a factor representing the ticket class and is described as, "a proxy for socio-economic status (SES)," by the dataset providers.
 
-There are three levels used in this factor: `1` for Upper class, `2` for Middle class, and `3` for Lower class.
+#### Summary
+
+We verified that there are no entries with a missing `Pclass` value:
+
+```{r eda-missing-pclass}
+Titanic.df %>% dplyr::select(Subset, Pclass) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+There are three levels used in this factor: 
+
+```{r eda-levels-pclass, include=TRUE, echo=FALSE}
+dplyr::tribble(
+  ~Level, ~Meaning,
+  1, "Lower Class",
+  2, "Middle Class",
+  3, "Upper Class"
+)
+```
 
 ```{r eda-count-pclass}
 Titanic.df %>%
@@ -181,39 +215,90 @@ Titanic.df %>%
     dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
     dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
-We see that, in the dataset, a touch more than half of the passengers are in the Lower class (`Pclass` == 3), about a quarter of the passengers are in the Upper class (`Pclass` == 1), and a remaining fifth of the passengers are from the Middle class (`Pclass` == 2). We see that the subsets provided by the competition have roughly equal distributions of `Pclass` between the training and testing data.
 
-```{r eda-missing-pclass}
-Titanic.train %>% dplyr::select(Pclass) %>% naniar::n_miss()
-```
-We can also see that no `Pclass` entries are missing.
-
-As `Pclass` and the response `Survived` are both categorical factors, we can perform a `Chi-Square` test to determine if `Pclass` is independent from `Survived`:
-
-- Null hypothesis: Variables are independent.
-- Alternative hypothesis: Variables are correlated in some way.
-
-```{r eda-chisq-pclass}
-chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Pclass, Survived)), correct=F)
-list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```{r eda-bar-pclass}
+Titanic.df %>%
+  ggplot2::ggplot(ggplot2::aes(x = Pclass, fill = Subset)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(c = 40) +
+  ggplot2::labs(title = "Count of Passengers by Class", 
+                x = "Passenger Class", y = "Passengers")
 ```
 
-According to the Chi-Squared test, `Pclass` has some kind of correlation with `Survived`.
+#### By Response
 
-```{r eda-corr-pclass}
-kt <- kruskal.test(Titanic.train$Pclass, Titanic.train$Survived)
-print.noquote(sprintf("%s on %s", kt$method, kt$data.name))
-print.noquote(sprintf("X-squared = %s (df %s)", round(kt$statistic, 2), kt$parameter))
-print.noquote(sprintf("p-value = %s (Significant? %s)", kt$p.value, kt$p.value < 0.05))
+```{r eda-bar-pclass-response}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Pclass, fill = Survived)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(h = c(20,125), c = 40) + 
+  ggplot2::labs(title = "Count of Passengers by Class (in Training Subset)", 
+                subtitle = "Stacked by Survival Outcome", 
+                x = "Passenger Class", y = "Passengers")
+```
+
+We see that, in the dataset, a touch more than half of the passengers are in the Lower class (`Pclass` == 3), about a quarter of the passengers are in the Upper class (`Pclass` == 1), and a remaining fifth of the passengers are from the Middle class (`Pclass` == 2). We see that the subsets provided by the competition have roughly equal distributions of `Pclass` between the training and testing data. Additionally, a greater proportion of passengers in the 3rd class appear to have died, compared to other ticket classes.
+
+`Pclass` and `Survived` are two categorical variables that we want to check for association. Typically, we would use a Chi-Squared test of independence to check if a relationship exists between two binary categorical variables. This test however, is sensitive to the number of levels present in each category.
+
+Since `Pclass` is not dichotomous (it has more than 2 category values), we can calculate [Cramer's V / Phi](https://www.r-bloggers.com/2011/06/example-8-39-calculating-cramers-v/), which is effectively the chi-square statistic rescaled to have a value between 0 and 1. 
+```{r eda-cramerv-pclass-response}
+(phi <- sjstats::crosstable_statistics(Titanic.train, "Pclass", "Survived"))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is a association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", phi$p.value < 0.05)))
+```
+
+We can see that `Pclass` has some kind of correlation with `Survived` (`P-value` $< 0.001$).
+
+```{r eda-crosstab-pclass-response}
+TPS <- xtabs(~ Survived + Pclass, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPS), 2))
+```
+
+```{r eda-mosiac-pclass-response}
+vcd::mosaic(TPS, shade=TRUE, legend=TRUE)
+vcd::assoc(TPS, shade=TRUE)
+```
+
+```{r eda-chisq-pclass-response}
+writeLines("Test for independence: ")
+(chi2 <- chisq.test(TPS, correct = FALSE))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is an association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", chi2$p.value < 0.05)))
 ```
 
 ### `Name`
 
-`Name` is a text feature containing the passenger name and titles.
+`Name` is a text feature containing the passenger name and titles. These, like `PassengerId`, are typically different for each passenger but are not guaranteed to be unique. Theoretically, two passengers could have the same exact name and title, despite the rarity of the occurrence. For this reason, `Name` is not used as an index variable.
+
+#### Summary
+
+We verified that there are no entries with a missing `Name` value:
+
+```{r eda-missing-name}
+Titanic.df %>% dplyr::select(Subset, Name) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+The names used for passengers were entered in phonetically by officials responsible for tracking passengers (and their tickets). The dataset reports names in a few formats. A few are listed below:
+
+```{r eda-formats-name}
+dplyr::tribble(
+  ~Format, ~Description,
+  "[Last Name], [Title]. [Passenger Name(s)] \"[Nickname]\"", "Male or (unmarried) female passenger with optional middle name or initial.",
+  "[Last Name], Mrs. [Spouse Name(s)] ([Maiden Name(s)])", "Married female passenger with spouse's name and first name.",
+  "[Last Name], Master. [Passenger Name(s)] ([Parent Name(s)])", "Unmarried male child passenger with parent's name listed."
+)
+```
 
 ```{r eda-sample-name}
 sample.df(Titanic.train %>% dplyr::select(Name), 5)
 ```
+We verify that a unique name is present for every passenger present in our dataset:
 
 ```{r eda-count-name}
 Titanic.df %>%
@@ -222,17 +307,9 @@ Titanic.df %>%
     dplyr::mutate(Proportion = round(`Unique` / sum(`Unique`), 2),
                   Total = sum(`Unique`))
 ```
+That said, `Name` carries with it some degree of additional context. There's a lot of potential data to mine from a name. One could make assumptions of a passenger's ethnicity and origins but this would require extensive outside research to corroborate. Some historians have already done such work - for example, in *The Dream and then the Nightmare*, historian Leila Salloum Elias speaks to the Syrian and Lebenase passengers [whose survivors detailed experiences of being shot at by officials from on-board the Titanic](https://www.encyclopedia-titanica.org/the-dream-and-then-the-nightmare-13095.html). 
 
-These, like `PassengerId`, are typically different for each passenger but are not guaranteed to be unique. Theoretically, two passengers could have the same exact name and title, despite the rarity of the occurrence. For this reason, `Name` is not used as an index variable.
- 
-That said, `Name` carries with it some degree of additional context. A person's first name and surname may be correlated with a particular region, class, or origin. A person's first name may additionally be correlated with one's age. Finally, a person's title can indicate martial status (ie. "Miss." vs. "Mrs.") and stature (ie., "Major.", "Dr."). These are all details that *may* impact one's ability to secure a spot on the rescue boats.
-
-```{r eda-chisq-name}
-chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Name, Survived)), correct=F)
-list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
-```
-
-To confirm our intuition, a `Chi-Square` test between `Name` and `Survived` suggests there is no correlation between the variable and the response.
+A person's first name and surname may be correlated with a particular region, class, or origin. A person's first name may additionally be correlated with one's age. Finally, a person's title can indicate martial status (ie. "Miss." vs. "Mrs.") and stature (ie., "Major.", "Dr."). These are all details that *may* impact one's ability to secure a spot on the rescue boats.
 
 In order to determine common details between passengers, we'll want to engineer additional features from this category, such as `First Name`, `Family Name`, `Title`, and `Martial Status`.
 
@@ -240,50 +317,117 @@ In order to determine common details between passengers, we'll want to engineer 
 
 The `Sex` predictor demarcates the listed gender (constrained here to `male` and `female`) for each passenger.
 
+#### Summary
+
+We verified that there are no entries with a missing `Sex` value:
+
+```{r eda-missing-sex}
+Titanic.df %>% dplyr::select(Subset, Sex) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
 ```{r eda-count-gender}
 Titanic.df %>%
     dplyr::group_by(Subset, Sex) %>%
     dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
     dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
-```{r eda-missing-gender}
-Titanic.train %>% dplyr::select(Sex) %>% naniar::n_miss()
-```
-We can also see that no `Sex` entries are missing.
 
-```{r eda-chisq-gender}
-chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Sex, Survived)), correct=F)
-list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
-```
+First, we can see that there's an imbalance in the male to female passenger ratio. The proportion of male passengers to female passengers is the same for both the training and test dataset, but we should be mindful of the imbalance when interpreting and choosing models that may be sensitive to this.
 
-We can see from a `Chi-Square` test that the `Sex` variable is significantly correlated with the `Survived` response.
-
-```{r eda-chisq-gender-class}
-chi2 = chisq.test(table(Titanic.train %>% dplyr::select(Sex, Pclass)), correct=F)
-list(Statistic = chi2$statistic, P.value = chi2$p.value, `Significant?` = chi2$p.value < 0.05)
+```{r eda-bar-gender}
+Titanic.df %>%
+  ggplot2::ggplot(ggplot2::aes(x = Sex, fill = Subset)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(c = 40) +
+  ggplot2::labs(title = "Count of Passengers by Gender", 
+                x = "Gender", y = "Passengers")
 ```
 
-We can see from another test, that `Sex` is also correlated with the `Pclass` variable.
+One common perception is that men were more likely to give up their seat to, "women and children."
+
+#### By Response
+
+```{r eda-bar-gender-response}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Sex, fill = Survived)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(h = c(20,125), c = 40) + 
+  ggplot2::labs(title = "Count of Passengers by Gender (in Training Subset)", 
+                subtitle = "Stacked by Survival Outcome", 
+                x = "Gender", y = "Passengers")
+```
+
+Since `Sex` is dichotomous, we can use the Chi-Square test to see if there is any association with `Survived`.
+
+```{r eda-cramerv-gender-response}
+(chi2 <- sjstats::crosstable_statistics(Titanic.train, "Sex", "Survived"))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is an association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", chi2$p.value < 0.05)))
+```
+We can see from the test that the `Sex` variable is significantly correlated with the `Survived` response.
+
+```{r eda-crosstab-gender-response}
+TSS <- xtabs(~ Survived + Sex, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSS), 2))
+```
+
+```{r eda-mosiac-gender-response}
+vcd::mosaic(TSS, shade=TRUE, legend=TRUE)
+vcd::assoc(TSS, shade=TRUE)
+```
+
+#### By `Pclass`
+
+We can also see if `Sex` is associated with `Pclass`, although this will use `Cramer's V` ($\phi^2$) instead of the $\chi^2$-statistic.
+
+```{r eda-cramerv-gender-pclass}
+(phi <- sjstats::crosstable_statistics(Titanic.train, "Pclass", "Sex"))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", phi$p.value < 0.05)))
+```
+We can see from the test that the `Sex` variable is significantly correlated with the `Pclass` variable.
+
+```{r eda-bar-gender-pclass}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Sex, fill = Pclass)) +
+  ggplot2::geom_bar(width = 0.5) +
+  ggplot2::scale_fill_hue(c = 40) + 
+  ggplot2::labs(title = "Count of Passengers by Gender (in Training Subset)", 
+                subtitle = "Stacked by Passenger Class", 
+                x = "Gender", y = "Passengers")
+```
+
+
+```{r eda-crosstab-gender-pclass}
+TPG <- xtabs(~ Pclass + Sex, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPG), 2))
+```
+
+```{r eda-mosiac-gender-pclass}
+vcd::mosaic(TPG, shade=TRUE, legend=TRUE)
+vcd::assoc(TPG, shade=TRUE)
+```
 
 ### `Age`
 
 `Age` is a numeric variable representing the age of a passenger at the time of the shipwreck. If the age is less than 1, a fractional representation is provided. If the age is estimated, the value is provided in the form of `xx.5`.
 
-```{r eda-count-age}
-Titanic.df %>%
-    dplyr::mutate(Age_Range = cut(Age, breaks = c(-Inf, 1, 17, 30, 50, Inf), right = TRUE, ordered_result = TRUE)) %>%
-    dplyr::group_by(Subset, Age_Range) %>%
-    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
-    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
-```
+#### Summary
+
+We verified that there are several entries with a missing `Sex` value:
 
 ```{r eda-missing-age}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Age) %>% naniar::miss_var_summary()
+Titanic.df %>% dplyr::select(Age, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
 ```
-
-We see that approximately 20% of both the train and test subsets have samples with missing ages. There are 177 passengers with no age estimated or listed in the training subset and 86 in the test subset. A quick look at the age ranges also suggests roughly equal distributions in both subsets for the different age ranges, when age is present.
-
-A little more than a third of the passengers are young adults between the ages of 17 and 30. About a quarter are adults who are between the ages of 30 and 50.
+We see that approximately 20% of both the train and test subsets have samples with missing ages. There are 177 passengers with no age present in the training subset and 86 with age missing from the test subset.
 
 ```{r eda-normal-age, fig.width=5, fig.height=5}
 Titanic.train %>%
@@ -294,82 +438,399 @@ Titanic.train %>%
     ggplot2::labs(title = "Normal Quantile Plot of Age", x = "Theoretical Quantiles", y = "Sample Quantiles")
 ```
 
-We can see that `Age` is approximately normally distributed, with some tails towards the end.
+We can see that `Age` is approximately normally distributed.
 
-We can also check to see if age is correlated with the respnose:
-
-```{r eda-corr-age}
-cor.test(Titanic.train$Age, as.numeric(Titanic.train$Survived))
+```{r eda-count-age}
+Titanic.df %>%
+    dplyr::mutate(Age_Range = cut(Age, breaks = c(-Inf, 1, 17, 30, 50, Inf), right = TRUE, ordered_result = TRUE)) %>%
+    dplyr::group_by(Subset, Age_Range) %>%
+    dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+    dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
-The correlation test suggests that `Age` has a statistically significant negative correlation with survival (p = 0.039) at a significance level of $\alpha = 0.05$.
 
-```{r eda-corr-age-sex}
-cor.test(Titanic.train$Age, as.numeric(Titanic.train$Sex))
+```{r eda-boxplot-age-gender-subset}
+Titanic.df %>% 
+  ggplot2::ggplot(ggplot2::aes(x = Sex, y = Age, fill = Subset)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Age by Gender", x = "Gender")
 ```
+
+We can see that there's a great overlap in the center locations when grouping age by gender. There are a few outliers for `Age` present in the training set (when `Sex` == "male") and one in the testing set (when `Sex` == "female").
+
+```{r eda-bar-age, fig.width = 8}
+Titanic.df %>%
+    ggplot2::ggplot(ggplot2::aes(x = Age, fill = Survived)) +
+    ggplot2::geom_histogram(binwidth = 10, alpha = 0.5) +
+    ggplot2::geom_freqpoly(ggplot2::aes(colour = Survived), binwidth = 10) +
+    ggplot2::facet_grid(~Subset) +
+    ggplot2::scale_x_continuous(breaks = seq(0, 90, by = 10)) +
+    ggplot2::scale_fill_hue(c = 40) + 
+    ggplot2::labs(title = "Count of Passengers by Age", 
+                  subtitle = "Stacked by Survival Outcome", 
+                  x = "Age", y = "Passengers")
+```
+A quick look at the age ranges also suggests roughly equal distribution shapes in both subsets for the different age ranges, when age is present. A little more than a third of the passengers are young adults between the ages of 17 and 30. About a quarter are adults who are between the ages of 30 and 50.
+
+#### By Response
+
+We can also check to see if age is correlated with the response:
+
+```{r eda-corr-age-response}
+(sjstats::means_by_group(Titanic.train, "Age", "Survived"))
+(r <- cor.test(~ Age + as.numeric(Survived), data = Titanic.train))
+writeLines(c("null hypothesis: there is no correlation between the variables",
+             "alternative hypothesis: there is a correlation between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-age-response}
+skimr::partition(skimr::skim(Titanic.train %>% dplyr::select(Age, Survived) %>% dplyr::group_by(Survived)))$numeric
+Titanic.train %>% 
+  ggplot2::ggplot(ggplot2::aes(x = Survived, y = Age, fill = Survived)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Age by Survival Outcome", x = "Survival Outcome") +
+  ggplot2::theme(legend.position = "none")
+```
+
+The correlation test suggests that `Age` has a statistically significant negative correlation with survival (`P-value` $= 0.039$) at a significance level of $\alpha = 0.05$.
+
+#### By `Pclass`
+
+We can also use the [Kruskal-Wallis](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/kruskal-wallis-test/) test to see if there's a difference between median `Age` grouped by `Pclass`.
+
+```{r eda-kruskal-age-pclass}
+(sjstats::means_by_group(Titanic.train, "Age", "Pclass"))
+(kt <- kruskal.test(Age ~ Pclass, Titanic.train))
+writeLines(c("null hypothesis: groups are from identical populations",
+             "alternative hypothesis: at least one group is from a different population",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-boxplot-age-pclass}
+skimr::partition(skimr::skim(Titanic.train %>% dplyr::select(Age, Pclass) %>% dplyr::group_by(Pclass)))$numeric
+Titanic.train %>% 
+  ggplot2::ggplot(ggplot2::aes(x = Pclass, y = Age, fill = Pclass)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::facet_grid(~ Survived) +
+  ggplot2::labs(title = "Boxplot of Age by Passenger Class and Survival Outcome", x = "Passenger Class") +
+  ggplot2::theme(legend.position = "none")
+```
+
+#### By `Sex`
+
+```{r eda-corr-age-gender}
+(sjstats::means_by_group(Titanic.train, "Age", "Sex"))
+(r <- cor.test(~ Age + as.numeric(Sex), data = Titanic.train))
+writeLines(c("null hypothesis: there is no correlation between the variables",
+             "alternative hypothesis: there is a correlation between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
 We can see that `Age` is also negatively correlated with the passenger gender reported in `Sex`. 
 
-We can also the Kruskal-Wallis test to see if there's a change in `Pclass` based on `Age`.
-
-```{r eda-corr-age-pclass}
-kt <- kruskal.test(Titanic.train$Age, Titanic.train$Fare)
-print.noquote(sprintf("%s on %s", kt$method, kt$data.name))
-print.noquote(sprintf("X-squared = %s (df %s)", round(kt$statistic, 2), kt$parameter))
-print.noquote(sprintf("p-value = %s (Significant? %s)", kt$p.value, kt$p.value < 0.05))
+```{r eda-kruskal-age-gender}
+(kt <- kruskal.test(Age ~ Sex, Titanic.train))
+writeLines(c("null hypothesis: groups are from identical populations",
+             "alternative hypothesis: at least one group is from a different population",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
 ```
 
-
+```{r eda-boxplot-age-gender}
+skimr::partition(skimr::skim(Titanic.train %>% dplyr::select(Age, Sex) %>% dplyr::group_by(Sex)))$numeric
+Titanic.train %>% 
+  ggplot2::ggplot(ggplot2::aes(x = Sex, y = Age, fill = Sex)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::facet_grid(~ Survived) +
+  ggplot2::labs(title = "Boxplot of Age by Gender and Survival Outcome", x = "Gender") +
+  ggplot2::theme(legend.position = "none")
+```
 
 ### `SibSp`
 
 `SibSp` is a numeric variable that counts the number of siblings and spouses a passenger has aboard the Titanic during the time of the shipwreck. Siblings are defined as being a brother, sister, stepbrother, or stepsister. Spouses are defined as husband and wife, with mistresses and fiances being ignored. 
 
+#### Summary
+
+We verified that there are no entries with a missing `SibSp` value:
+
+```{r eda-missing-sibsp}
+Titanic.df %>% dplyr::select(SibSp, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
 ```{r eda-count-sibsp}
 Titanic.df %>%
-    dplyr::mutate(SibSp_Range = cut(SibSp, breaks = c(-Inf, 0, Inf), labels = c("No Siblings/Spouses", "1 or More Siblings/Spouses"), right = TRUE, ordered_result = TRUE)) %>%
-    dplyr::group_by(Subset, SibSp_Range) %>%
+    dplyr::group_by(Subset, SibSp) %>%
     dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
     dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
 
-```{r eda-missing-sibsp}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(SibSp) %>% naniar::miss_var_summary()
+#### By Response
+
+We can also check to see if `SibSp` is correlated with the response:
+
+```{r eda-corr-sibsp-response}
+(sjstats::means_by_group(Titanic.train, "Survived", "SibSp"))
+(r <- cor.test(~ SibSp + as.numeric(Survived), data = Titanic.train))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is a association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
 ```
 
-TODO: What is it?
-TODO: Count of unique values?
-TODO: Is any data missing? Training subset? Test subset?
-TODO: How does it effect the response?
-TODO: Correlation with other features?
+`SibSp` does not appear to be immediately associated with the response using a Cramer's V test.
+
+```{r eda-boxplot-sibsp-response}
+skimr::partition(skimr::skim(Titanic.train %>% dplyr::select(SibSp, Survived) %>%
+                               dplyr::group_by(Survived)))$numeric
+Titanic.train %>% 
+  dplyr::select(SibSp, Survived) %>%
+  dplyr::group_by(Survived, SibSp) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  ggplot2::ggplot(ggplot2::aes(x = SibSp, y = Count, colour = Survived)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(title = "Boxplot of Sibling, Spouse by Frequency", x = "SibSp", y = "Frequency")
+```
+
+```{r eda-crosstab-sibsp-response}
+TSPS <- xtabs(~ SibSp + Survived, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSPS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSPS), 2))
+```
+
+```{r eda-mosiac-sibsp-response}
+vcd::mosaic(TSPS, shade=TRUE, legend=TRUE)
+vcd::assoc(TSPS, shade=TRUE)
+```
+
+#### By `Pclass`
+
+```{r eda-crosstab-sibsp-pclass}
+TSPP <- xtabs(~ SibSp + Pclass, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSPP)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSPP), 2))
+```
+
+```{r eda-kruskal-sibsp-pclass}
+(kt <- kruskal.test(Pclass ~ SibSp, data = Titanic.train))
+writeLines(c("null hypothesis: groups are from identical populations",
+             "alternative hypothesis: at least one group is from a different population",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-mosiac-sibsp-pclass}
+vcd::mosaic(TSPP, shade=TRUE, legend=TRUE)
+vcd::assoc(TSPP, shade=TRUE)
+```
+
+#### By `Sex`
+
+```{r eda-crosstab-sibsp-gender}
+TSPG <- xtabs(~ SibSp + Sex, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TSPG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TSPG), 2))
+```
+
+```{r eda-kruskal-sibsp-gender}
+(kt <- kruskal.test(Sex ~ SibSp, data = Titanic.train))
+writeLines(c("null hypothesis: groups are from identical populations",
+             "alternative hypothesis: at least one group is from a different population",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-mosiac-sibsp-gender}
+vcd::mosaic(TSPG, shade=TRUE, legend=TRUE)
+vcd::assoc(TSPG, shade=TRUE)
+```
+
+#### By `Age`
+
+```{r eda-corr-sibsp-age}
+(r <- cor.test(~ SibSp + Age, data = Titanic.df, method = "spearman", exact = FALSE))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is an association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-sibsp-age}
+Titanic.df %>%
+  dplyr::select(Subset, Survived, SibSp, Age) %>%
+  ggplot2::ggplot(ggplot2::aes(x = SibSp, y = Age, fill = SibSp, group = SibSp)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::scale_fill_gradient(low = "white", high = "black") +
+  ggplot2::scale_x_continuous(breaks = seq(0,8,by=1), limits = c(-0.5,8.5)) +
+  ggplot2::labs(title = "Boxplot of Age by Sibling/Spouse Count", x = "Number of Siblings and/or Spouses", y = "Passenger Age")
+```
+
 
 ### `Parch`
 
-`Parch` is a numeric variable that counts the number of siblings and spouses a passenger has aboard the Titanic during the time of the shipwreck. Siblings are defined as being a brother, sister, stepbrother, or stepsister. Spouses are defined as husband and wife, with mistresses and fiances being ignored. 
+`Parch` is a numeric variable that counts the number of parents and/or children a passenger has aboard the Titanic during the time of the shipwreck. Parents are defined as being a mother or father. Spouses are defined as being a daughter, son, stepdaughter, or stepson. (Children who travelled only with a nanny would have `Parch` $= 0$). 
 
+#### Summary
+
+We verified that there are no entries with a missing `Parch` value:
+
+```{r eda-missing-parch}
+Titanic.df %>% dplyr::select(Parch, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
 
 ```{r eda-count-parch}
 Titanic.df %>%
-    dplyr::mutate(Parch_Range = cut(Parch, breaks = c(-Inf, 0, Inf), labels = c("No Parents/Children", "1 or More Parents/Children"), right = TRUE, ordered_result = TRUE)) %>%
-    dplyr::group_by(Subset, Parch_Range) %>%
+    dplyr::group_by(Subset, Parch) %>%
     dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
     dplyr::mutate(Proportion = round(Count / sum(Count), 2))
 ```
 
-```{r eda-missing-parch}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Parch) %>% naniar::miss_var_summary()
+#### By Response
+
+We can also check to see if `Parch` is correlated with the response:
+
+```{r eda-corr-parch-response}
+(sjstats::means_by_group(Titanic.train, "Survived", "Parch"))
+(r <- cor.test(~ Parch + as.numeric(Survived), data = Titanic.train))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is a association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
 ```
 
-TODO: What is it?
-TODO: Count of unique values?
-TODO: Is any data missing? Training subset? Test subset?
-TODO: How does it effect the response?
-TODO: Correlation with other features?
+`Parch` does not appear to be immediately associated with the response using a Cramer's V test.
+
+```{r eda-boxplot-parch-response}
+skimr::partition(skimr::skim(Titanic.train %>% 
+                               dplyr::select(Parch, Survived) %>%
+                               dplyr::group_by(Survived)))$numeric
+Titanic.train %>% 
+  dplyr::select(Parch, Survived) %>%
+  dplyr::group_by(Survived, Parch) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  ggplot2::ggplot(ggplot2::aes(x = Parch, y = Count, colour = Survived)) +
+  ggplot2::geom_point() +
+  ggplot2::labs(title = "Boxplot of Parent, Children by Frequency", x = "Parch", y = "Frequency")
+```
+
+```{r eda-crosstab-parch-response}
+TPCS <- xtabs(~ Parch + Survived, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCS), 2))
+```
+
+```{r eda-mosiac-parch-response}
+vcd::mosaic(TPCS, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCS, shade=TRUE)
+```
+
+#### By `Pclass`
+
+We can see that `Parch` does not have an association with `Pclass`.
+
+```{r eda-crosstab-parch-pclass}
+TPCP <- xtabs(~ Parch + Pclass, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCP)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCP), 2))
+```
+
+```{r eda-mosiac-parch-pclass}
+vcd::mosaic(TPCP, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCP, shade=TRUE)
+```
+
+
+
+#### By `Sex`
+
+```{r eda-crosstab-parch-gender}
+TPCG <- xtabs(~ Sex + Parch, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCG), 2))
+```
+
+```{r eda-cramerv-parch-gender}
+writeLines("Test for independence: ")
+(phi <- sjstats::crosstable_statistics(TPCG))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is an association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", phi$p.value < 0.05)))
+```
+
+```{r eda-mosiac-parch-gender}
+vcd::mosaic(TPCG, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCG, shade=TRUE)
+```
+
+
+
+
+
+#### By `Age`
+
+```{r eda-corr-parch-age}
+(r <- cor.test(~ Parch + Age, data = Titanic.df, method = "spearman", exact = FALSE))
+writeLines(c("null hypothesis: there is no association between the variables",
+             "alternative hypothesis: there is an association between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-parch-age, fig.width=6}
+Titanic.df %>%
+  dplyr::select(Subset, Survived, Parch, Age) %>%
+  ggplot2::ggplot(ggplot2::aes(x = Parch, y = Age, fill = Parch, group = Parch)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::scale_fill_gradient(low = "white", high = "black") +
+  ggplot2::scale_x_continuous(breaks = seq(0,6,by=1), limits = c(-0.5,6.5)) +
+  ggplot2::labs(title = "Boxplot of Age by Parent/Child Count", x = "Number of Parents and/or Children", y = "Passenger Age")
+```
+
+#### By `SibSp`
+
+`Parch` appears to have a association with `SibSp`.
+
+```{r eda-crosstab-parch-sibsp}
+TPCSP <- xtabs(~ Parch + SibSp, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TPCSP)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TPCSP), 2))
+```
+
+```{r eda-mosiac-parch-sibsp}
+vcd::mosaic(TPCSP, shade=TRUE, legend=TRUE)
+vcd::assoc(TPCSP, shade=TRUE)
+```
 
 ### `Ticket`
 
 `Ticket` is a text feature containing a non-contiguous ticket identifier. These are non-unique, as repetitions indicate that passengers were sharing a cabin or travelling together on a joint ticket.
 
+#### Summary
+
+We verified that there are no entries with a missing `Ticket` value:
+
+```{r eda-missing-ticket}
+Titanic.df %>% dplyr::select(Ticket, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+```{r eda-formats-ticket}
+dplyr::tribble(
+  ~Prefix, ~Number, ~Description,
+  NA, "[Ticket Number]", "Ticket with only a number and no prefix.",
+  "[Ticket Prefix]", "[Ticket Number]", "Ticket with a number and a cabin, embarkment, or status demarcation.",
+  "LINE", NA, "Special prefix-only ticket given to American Line employees."
+)
+```
+
 ```{r eda-sample-ticket}
-sample.df(Titanic.train %>% dplyr::select(Ticket), 10)
+sample.df(Titanic.train %>% dplyr::select(Ticket), 5)
 ```
 
 ```{r eda-ticket-content}
@@ -377,7 +838,7 @@ Titanic.df %>%
     dplyr::select(PassengerId, Name, Ticket, Subset) %>%
     dplyr::group_by(Subset, Ticket) %>%
     dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
-    dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+    dplyr::mutate(Distinct = dplyr::n_distinct(Ticket), Proportion = round(Count / sum(Count), 4)) %>%
     dplyr::arrange(desc(Count))
 ```
 
@@ -387,14 +848,7 @@ Seeing as there are 7 ticket holders for ticket number `1601`, we can see the fo
 Titanic.train %>% dplyr::filter(Ticket == "1601")
 ```
 
-We can see this is a joint ticket, because the fare is the same. The ticket can be a proxy for origin in a way that port of embarkment is not. The passenger names imply that these passengers may have been of Asian descent. Could they have possibly faced descrimination on the Titanic in 1912 that could have impacted their survival?
-
-[In 2014, China was the second most popular incidence for the last name of `Bing`](https://forebears.io/surnames/bing)
-https://forebears.io/surnames/lang
-
-```{r eda-missing-ticket}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Ticket) %>% naniar::miss_var_summary()
-```
+We can see this is a joint ticket, because the fare is the same.
 
 ```{r eda-special-ticket}
 Titanic.df %>% dplyr::filter(Ticket == "LINE")
@@ -402,16 +856,29 @@ Titanic.df %>% dplyr::filter(Ticket == "LINE")
 
 Here we can see that the special `LINE` ticket is a free ride for a set of people of various, unrelated people. Further research indicates this was a special ticket given to a set of American Line employees travelling to New York via the RMS Titanic. The tickets were paid for by the company, hence the free fare.
 
-TODO: What is it?
-TODO: Count of unique values?
-TODO: Is any data missing? Training subset? Test subset?
-TODO: How does it effect the response?
-TODO: Correlation with other features?
+
+
+
+
 
 ### `Fare`
 
+`Fare` is a numeric value representing the amount paid for a corresponding ticket.
+
+#### Summary 
+
+We verified that there is a single entry a missing `Fare` value:
+
 ```{r eda-missing-fare}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Fare) %>% naniar::miss_var_summary()
+Titanic.df %>% dplyr::select(Fare, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+```{r eda-boxplot-fare-subset, fig.height=4, fig.width=10}
+Titanic.df %>%
+  ggplot2::ggplot(ggplot2::aes(x = Fare, fill = Subset)) +
+  ggplot2::geom_histogram(binwidth = 5, alpha = 0.5) + 
+  ggplot2::facet_grid(~Survived) +
+  ggplot2::labs(title = "Frequency of Fare by Survival Outcome", x = "Fare (in 1912 USD)", y = "Frequency")
 ```
 
 TODO: What is it?
@@ -419,74 +886,374 @@ TODO: Count of unique values?
 TODO: Is any data missing? Training subset? Test subset?
 TODO: How does it effect the response?
 TODO: Correlation with other features?
+
+
+#### By Response
+
+```{r eda-corr-fare-response}
+(sjstats::means_by_group(Titanic.df, "Fare", "Survived"))
+(r <- cor.test(~ Fare + as.numeric(Survived), data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-fare-response}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Survived, y = Fare, fill = Survived)) + 
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Fare by Survival Outcome", x = "Survival Outcome") +
+  ggplot2::theme(legend.position = "none")
+```
+#### By `Pclass`
+
+```{r eda-kruskal-fare-pclass}
+(sjstats::means_by_group(Titanic.df, "Fare", "Pclass"))
+(kt <- kruskal.test(Pclass ~ Fare, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-boxplot-fare-pclass}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Pclass, y = Fare, fill = Pclass)) + 
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Fare by Passenger Class", x = "Passenger Class") +
+  ggplot2::theme(legend.position = "none")
+```
+
+#### By `Sex`
+
+```{r eda-corr-fare-gender}
+(sjstats::means_by_group(Titanic.df, "Fare", "Sex"))
+(r <- cor.test(~ Fare + as.numeric(Sex), data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-boxplot-fare-gender}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Sex, y = Fare, fill = Sex)) + 
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Fare by Passenger Gender", x = "Passenger Gender") +
+  ggplot2::theme(legend.position = "none")
+```
+
+#### By `Age`
+
+```{r eda-corr-fare-age}
+aov.Age.Fare <- aov(Age ~ Fare, data = Titanic.df)
+summary(aov.Age.Fare)
+(r <- cor.test(~ Age + Fare, data = Titanic.df))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", r$p.value < 0.05)))
+```
+
+```{r eda-scatter-fare-age}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Age, y = Fare, colour = Pclass)) + 
+  ggplot2::geom_point(size = 2, alpha = 0.5) +
+  ggplot2::scale_y_continuous(trans = 'log2') +
+  ggplot2::facet_grid(~Survived) +
+  ggplot2::labs(title = "Scatterplot of Fare by Age", x = "Passenger Age")
+```
+
+
+#### By `SibSp`
+
+```{r eda-kruskal-fare-sibsp}
+(sjstats::means_by_group(Titanic.df, Fare, SibSp))
+(kt <- kruskal.test(SibSp ~ Fare, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-boxplot-fare-sibsp}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = SibSp, y = Fare, fill = SibSp, group = SibSp)) + 
+  ggplot2::geom_boxplot() +
+  ggplot2::scale_fill_gradient(low = "white", high = "black") +
+  ggplot2::scale_x_continuous(breaks = seq(0,8,by=1), limits = c(-0.5,8.5)) +
+  ggplot2::labs(title = "Boxplot of Fare by Sibling/Spouse Count", x = "Number of Siblings and/or Spouses") +
+  ggplot2::theme(legend.position = "none")
+```
+
+#### By `Parch`
+
+```{r eda-kruskal-fare-parch}
+(sjstats::means_by_group(Titanic.df, Fare, Parch))
+(kt <- kruskal.test(Parch ~ Fare, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-boxplot-fare-parch}
+Titanic.train %>%
+  ggplot2::ggplot(ggplot2::aes(x = Parch, y = Fare, fill = Parch, group = Parch)) + 
+  ggplot2::geom_boxplot() +
+  ggplot2::scale_fill_gradient(low = "white", high = "black") +
+  ggplot2::scale_x_continuous(breaks = seq(0,6,by=1), limits = c(-0.5,6.5)) +
+  ggplot2::labs(title = "Boxplot of Fare by Parent/Child Count", x = "Number of Parents and/or Children") +
+  ggplot2::theme(legend.position = "none")
+```
 
 ### `Cabin`
 
+`Cabin` represents the location of the room a passenger was paying for. There are [deckplans](https://www.encyclopedia-titanica.org/titanic-deckplans/) available that show where each cabin is on the ship.
+
+#### Summary
+
+We verified that there are several entries with a missing `Cabin` value:
+
 ```{r eda-missing-cabin}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Age) %>% naniar::miss_var_summary()
+Titanic.df %>% dplyr::select(Cabin, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
 ```
 
-TODO: What is it?
-TODO: Count of unique values?
-TODO: Is any data missing? Training subset? Test subset?
-TODO: How does it effect the response?
-TODO: Correlation with other features?
+```{r eda-count-cabin}
+Titanic.df %>%
+  dplyr::group_by(Subset, Cabin) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
+
+#### By Response
+
+```{r eda-kruskal-cabin-response}
+(sjstats::means_by_group(Titanic.df, Survived, Cabin))
+(kt <- kruskal.test(Survived ~ Cabin, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+```{r eda-crosstab-cabin-response}
+TCS <- xtabs(~ Survived + Cabin, data = Titanic.df)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TCS)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TCS), 2))
+```
+
+```{r eda-mosaic-cabin-response}
+vcd::assoc(TCS, shade=TRUE)
+```
+
+#### By `Sex`
+
+```{r eda-kruskal-cabin-gender}
+(sjstats::means_by_group(Titanic.df, Sex, Cabin))
+(kt <- kruskal.test(Sex ~ Cabin, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
+
+```{r eda-crosstab-cabin-gender}
+TCG <- xtabs(~ Sex + Cabin, data = Titanic.df)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TCG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TCG), 2))
+```
+
+```{r eda-mosaic-cabin-gender}
+vcd::mosaic(TCG, shade=TRUE, legend=TRUE)
+vcd::assoc(TCG, shade=TRUE)
+```
+
+#### By `Age`
+
+```{r eda-anova-cabin-age}
+Titanic.df %>% dplyr::select(Subset, Cabin, Age) %>% dplyr::group_by(Subset, Cabin) %>% skimr::skim()
+(aov.Age.Cabin <- aov(Age ~ Cabin, data = Titanic.train))
+summary(aov.Age.Cabin)
+```
+
+#### By `Fare`
+
+```{r eda-anova-cabin-fare}
+Titanic.df %>% dplyr::select(Subset, Cabin, Fare) %>% dplyr::group_by(Subset, Cabin) %>% skimr::skim()
+(aov.Fare.Cabin <- aov(Fare ~ Cabin, data = Titanic.train))
+summary(aov.Fare.Cabin)
+```
 
 ### `Embarked`
 
+#### Summary
+
+We verified that there are several entries with a missing `Cabin` value:
+
 ```{r eda-missing-embarked}
-Titanic.df %>% dplyr::group_by(Subset) %>% dplyr::select(Embarked) %>% naniar::miss_var_summary()
+Titanic.df %>% dplyr::select(Embarked, Subset) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
 ```
-TODO: What is it?
-TODO: Count of unique values?
-TODO: Is any data missing? Training subset? Test subset?
-TODO: How does it effect the response?
-TODO: Correlation with other features?
 
-## Data Imputation
+```{r eda-count-embarked}
+Titanic.df %>%
+  dplyr::group_by(Subset, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
 
-### `Age` (imputation by `Pclass`?)
+#### By Response
 
-TODO: What is missing?
+```{r eda-kruskal-embarked-response}
+(sjstats::means_by_group(Titanic.df, Survived, Embarked))
+(kt <- kruskal.test(Survived ~ Embarked, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
 
-### `Cabin` (imputation by `randomForest`?)
+```{r eda-count-embarked-response}
+Titanic.train %>%
+  dplyr::group_by(Survived, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
 
-### `Embarked` (imputation by `Pclass`?)
+```{r eda-crosstab-embarked-response}
+TES <- xtabs(~ Survived + Embarked, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TES)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TES), 2))
+```
 
-## Feature Engineering
+```{r eda-mosaic-embarked-response}
+vcd::mosaic(TES, shade=TRUE, legend=TRUE)
+vcd::assoc(TES, shade=TRUE)
+```
 
-### `First Name` (extracted from `Name`)
+#### By `Pclass`
 
-### `Family Name` (extracted from `Name`)
+```{r eda-kruskal-embarked-pclass}
+(sjstats::means_by_group(Titanic.df, Pclass, Embarked))
+(kt <- kruskal.test(Pclass ~ Embarked, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
 
-### `Middle Name` (extracted from `Name`)
+```{r eda-count-embarked-pclass}
+Titanic.df %>%
+  dplyr::group_by(Pclass, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
 
-### `Title` (extracted from `Name`)
+```{r eda-crosstab-embarked-pclass}
+TEP <- xtabs(~ Pclass + Embarked, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TEP)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TES), 2))
+```
 
-### `Martial Status` (extracted from `Name`)
+```{r eda-mosaic-embarked-pclass}
+vcd::mosaic(TEP, shade=TRUE, legend=TRUE)
+vcd::assoc(TEP, shade=TRUE)
+```
 
-TODO: Summary/Correlation.
+#### By `Sex`
 
-### `AgeRange` (extracted from `Age`)
+```{r eda-kruskal-embarked-gender}
+(sjstats::means_by_group(Titanic.df, Sex, Embarked))
+(kt <- kruskal.test(Sex ~ Embarked, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
 
-Factor representing if the passenger is an infant, child, or adult. Useful for interpretation.
+```{r eda-count-embarked-gender}
+Titanic.df %>%
+  dplyr::group_by(Sex, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
 
-TODO: Summary/Correlation.
+```{r eda-crosstab-embarked-gender}
+TEG <- xtabs(~ Sex + Embarked, data = Titanic.train)
+writeLines("Cross-tabluation frequencies: ")
+ftable(TEG)
+writeLines("Cross-tabluation proportions: ")
+ftable(round(prop.table(TES), 2))
+```
 
-### `withParent` (extracted from `AgeRange` and `Parch`)
+```{r eda-mosaic-embarked-gender}
+vcd::mosaic(TEG, shade=TRUE, legend=TRUE)
+vcd::assoc(TEG, shade=TRUE)
+```
 
-If `InfChiAd` is either 1 or 2 and if Parch is 0.... child is with nanny.
+#### By `Age`
 
-### `Deck` (extracted from `Cabin`)
+```{r eda-anova-embarked-age}
+Titanic.df %>% dplyr::select(Embarked, Age) %>% dplyr::group_by(Embarked) %>% skimr::skim()
+(aov.Age.Embarked <- aov(Age ~ Embarked, data = Titanic.df))
+summary(aov.Age.Embarked)
+```
+```{r eda-boxplot-embarked-age}
+Titanic.df %>%
+  ggplot2::ggplot(ggplot2::aes(x = Embarked, y = Age, fill = Embarked)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Fare by Passenger Age", x = "Port of Embarkment (if Known)", y = "Age")
+```
 
-### `TicketPrefix` (extracted from `Ticket`)
+#### By `SibSp`
 
-### `TicketNumber` (extracted from `Ticket`)
+```{r eda-kruskal-embarked-sibsp}
+(sjstats::means_by_group(Titanic.df, SibSp, Embarked))
+(kt <- kruskal.test(SibSp ~ Embarked, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
 
-## Modelling Passenger Survival
+```{r eda-count-embarked-sibsp}
+Titanic.df %>%
+  dplyr::group_by(SibSp, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
 
-### Logistic Regression (with `glm`)
+#### By `Parch`
 
-### Feature Importance (with `randomForest`)
+```{r eda-kruskal-embarked-parch}
+(sjstats::means_by_group(Titanic.df, Parch, Embarked))
+(kt <- kruskal.test(Parch ~ Embarked, data = Titanic.train))
+writeLines(c("null hypothesis: there is no relationship between the variables",
+             "alternative hypothesis: there is a relationship between the variables",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
 
-### Classification Tuning (with Cross-Validation)
+```{r eda-count-embarked-parch}
+Titanic.df %>%
+  dplyr::group_by(Parch, Embarked) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop_last") %>%
+  dplyr::mutate(Proportion = round(Count / sum(Count), 2)) %>%
+  dplyr::arrange(desc(Proportion), desc(Count))
+```
+
+#### By `Fare`
+
+```{r eda-anova-embarked-fare}
+Titanic.df %>% dplyr::select(Embarked, Fare) %>% dplyr::group_by(Embarked) %>% skimr::skim()
+(aov.Fare.Embarked <- aov(Fare ~ Embarked, data = Titanic.df))
+summary(aov.Fare.Embarked)
+```
+
+```{r eda-boxplot-embarked-fare}
+Titanic.df %>%
+  ggplot2::ggplot(ggplot2::aes(x = Embarked, y = Fare, fill = Embarked)) +
+  ggplot2::geom_boxplot() +
+  ggplot2::labs(title = "Boxplot of Fare by Port of Embarkment", x = "Port of Embarkment (if Known)", y = "Fare (in 1912 USD)")
+```

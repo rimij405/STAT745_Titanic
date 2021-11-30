@@ -1,0 +1,481 @@
+---
+title: "Titanic (Kaggle Competition): Data Imputation Validation"
+output: 
+  # Output as a previewable HTML Notebook.
+  html_notebook:
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    toc_depth: 3
+  # Output as an rmarkdown::pdf_document()
+  pdf_document:
+    keep_tex: true
+    highlight: tango
+    fig_caption: true
+    df_print: kable
+    toc: true
+    toc_depth: 3
+# pandoc -> pdfLaTeX rendering options:
+fontsize: 11pt
+geometry:
+  - margin=1in
+  - heightrounded
+documentclass: scrartcl
+papersize: a4
+urlcolor: violet
+toccolor: blue
+---
+
+```{r setup, include=FALSE}
+# Set the root directory.
+knitr::opts_knit$set(root.dir = here::here(""))
+
+# Set the chunk options.
+knitr::opts_chunk$set(
+    ## ---- Formatting Options ----
+    comment = "",
+    include = TRUE,
+    collapse = TRUE,
+    echo = TRUE,
+    strip.white = TRUE,
+    
+    ## ---- Output Options ----
+    message = TRUE,
+    warning = TRUE,
+    error = TRUE,
+    results = 'markup',
+    
+    ## ---- Display Options ----
+    fig.height = 4,
+    fig.width = 6
+)
+
+# Source loader file.
+source(here::here("R/loader.R"))
+load.data()
+```
+
+This report contains imputation details about the Titanic prediction models.
+
+## Setup
+
+Our investigation makes use of several R packages that made it easier to summarize, visualize, manipulate, model, and impute missing data. These packages are specified below.
+
+```{r load-packages, include=TRUE, echo=FALSE}
+library(magrittr) # Attached for the `%>%` (pipe) and `extract` functions.
+
+loadNamespace("renv")    # Project dependency tracker for collaboration.
+loadNamespace("here")    # Used for obtaining paths relative to project root.
+loadNamespace("readr")   # Tidyverse data reader.
+loadNamespace("tidyr")   # Tidyverse data wrangler.
+loadNamespace("qqplotr") # For plotting quantile-quantile plots.
+loadNamespace("ggmosaic") # For plotting mosaic plots.
+loadNamespace("visdat")  # For visualization of data.
+loadNamespace("ltm")     # For EDA.
+loadNamespace("sjstats") # For EDA.
+loadNamespace("vcd")     # For EDA.
+loadNamespace("skimr")   # For finding statistical summaries.
+loadNamespace("naniar")  # Handle NA values in a tabular format.
+loadNamespace("simputation")  # Missing data imputation.
+loadNamespace("e1071")   # For classification.
+loadNamespace("randomForest") # For classification.
+loadNamespace("neuralnet")    # For deep learning.
+```
+
+## Associations
+
+```{r eda-assoc-spearman}
+s <- cor(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train, method = "spearman", exact = FALSE))
+s.p_mat <- ggcorrplot::cor_pmat(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train), method = "spearman", exact = FALSE)
+ggcorrplot::ggcorrplot(corr = s, p.mat = s.p_mat, method = "circle", type = "full", title = "Spearman Correlation")
+```
+
+```{r eda-assoc-kendall}
+s <- cor(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train, method = "pearson", exact = FALSE))
+s.p_mat <- ggcorrplot::cor_pmat(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train), method = "pearson", exact = FALSE)
+ggcorrplot::ggcorrplot(corr = s, p.mat = s.p_mat, method = "circle", type = "full", title = "Pearson Correlation")
+```
+
+## Data Imputation
+
+### `Age`
+
+#### Missingness Summary
+
+```{r impute-summary-age}
+Titanic.train %>% dplyr::select(Age) %>% naniar::miss_var_summary()
+```
+
+```{r impute-baseline-age}
+# Get subset of missing Age records.
+(Age.miss <- Titanic.train %>%
+  dplyr::filter(is.na(Age)))
+
+# Get subset of complete Age records
+# and make train/validation subsets.
+Age.complete <- Titanic.train %>% dplyr::filter(!is.na(Age))
+n_samples <- floor(0.80 * nrow(Age.complete))
+indices <- sample(1:nrow(Age.complete), size = n_samples)
+(Age.complete %<>%
+  dplyr::mutate(Subset = dplyr::if_else(dplyr::row_number() %in% indices, "Train", "Validation")) %>%
+  dplyr::mutate(Response = ifelse(Subset == "Validation", NA, Age)))
+```
+
+#### Associated Features
+
+```{r impute-corr-age}
+writeLines("Correlation: ")
+cor.test(~ Age + Fare, data = Titanic.df)
+cor.test(~ Age + SibSp, data = Titanic.df)
+cor.test(~ Age + Parch, data = Titanic.df)
+
+writeLines("ANOVA: ")
+sjstats::anova_stats(aov(Age ~ Name, data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ Pclass, data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ Embarked, data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ Ticket, data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ Survived, data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ factor(SibSp), data = Titanic.df))
+sjstats::anova_stats(aov(Age ~ factor(Parch), data = Titanic.df))
+```
+
+#### Imputation Candidates
+
+```{r impute-median-age}
+impute.median.age <- function(x, data) {
+    return(Age.complete %>%
+        simputation::impute_median(x) %>%
+        dplyr::mutate(Residuals = Age - Response) %>%
+        dplyr::summarise(
+            MSE = mean(Residuals**2, na.rm = TRUE),
+            RMSE = sqrt(MSE),
+            MAE = mean(abs(Residuals), na.rm = TRUE),
+            n_miss = sum(is.na(Response))
+        ) %>% dplyr::mutate(Formula = deparse(x)))
+}
+
+dplyr::bind_rows(list(
+    impute.median.age(Response ~ Survived),
+    impute.median.age(Response ~ Pclass),
+    impute.median.age(Response ~ SibSp),
+    impute.median.age(Response ~ Parch),
+    impute.median.age(Response ~ Survived | Pclass)
+)) %>% dplyr::arrange(MSE, RMSE, MAE)
+```
+
+```{r impute-lm-age}
+impute.lm.age <- function(x, data) {
+    return(Age.complete %>%
+        simputation::impute_lm(x) %>%
+        dplyr::mutate(Residuals = Age - Response) %>%
+        dplyr::summarise(
+            MSE = mean(Residuals**2),
+            RMSE = sqrt(MSE),
+            MAE = mean(abs(Residuals)),
+            n_miss = sum(is.na(Response))
+        ) %>% dplyr::mutate(Formula = deparse(x)))
+}
+
+dplyr::bind_rows(list(
+    impute.lm.age(Response ~ Survived | Pclass),
+    impute.lm.age(Response ~ Pclass),
+    impute.lm.age(Response ~ Survived + Pclass + SibSp + Parch),
+    impute.lm.age(Response ~ Pclass + SibSp + Parch + Sex | Survived),
+    impute.lm.age(Response ~ Pclass + SibSp + Parch | Survived + Sex),
+    impute.lm.age(Response ~ SibSp + Parch | Survived + Sex + Pclass),
+    impute.lm.age(Response ~ SibSp + Parch + Fare | Survived + Sex + Pclass),
+    impute.lm.age(Response ~ SibSp + Parch + Fare | Survived + Sex + Pclass)
+)) %>% dplyr::arrange(MSE, RMSE, MAE)
+```
+
+```{r impute-rf-age}
+impute.rf.age <- function(x, data) {
+    return(Age.complete %>%
+        simputation::impute_rf(x) %>%
+        dplyr::mutate(Residuals = Age - Response) %>%
+        dplyr::summarise(
+            MSE = mean(Residuals**2),
+            RMSE = sqrt(MSE),
+            MAE = mean(abs(Residuals)),
+            n_miss = sum(is.na(Response))
+        ) %>% dplyr::mutate(Formula = deparse(x)))
+}
+
+dplyr::bind_rows(list(
+    impute.rf.age(Response ~ Survived | Pclass),
+    impute.rf.age(Response ~ Pclass),
+    impute.rf.age(Response ~ Survived + Pclass + SibSp + Parch),
+    impute.rf.age(Response ~ Pclass + SibSp + Parch + Sex | Survived),
+    impute.rf.age(Response ~ Pclass + SibSp + Parch | Survived + Sex),
+    impute.rf.age(Response ~ SibSp + Parch | Survived + Sex + Pclass),
+    impute.rf.age(Response ~ SibSp + Parch + Fare | Survived + Sex + Pclass)
+)) %>% dplyr::arrange(MSE, RMSE, MAE)
+```
+
+
+#### Imputation
+
+### `Cabin`
+
+#### Missingness Summary
+
+```{r impute-summary-cabin}
+Titanic.df %>% dplyr::select(Subset, Cabin) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+#### Association Features
+
+```{r impute-glm-cabin}
+Cabin.known <- Titanic.df %>% dplyr::mutate(Cabin = ifelse(is.na(Cabin), "Unknown", "Known"), Cabin = factor(Cabin))
+
+writeLines("Logistic Regressions: ")
+summary(glm(Survived ~ 0 + Cabin, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + Pclass, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + Sex, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + Age, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + SibSp, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + Parch, data = Cabin.known, family = "binomial"))
+# summary(glm(Cabin ~ 0 + Ticket, data = Cabin.known, family = "binomial"))
+summary(glm(Cabin ~ 0 + Embarked, data = Cabin.known, family = "binomial"))
+```
+
+#### Imputation Candidates
+
+```{r impute-baseline-cabin}
+# Get subset of missing records.
+(Cabin.miss <- Titanic.df %>%
+  dplyr::filter(is.na(Cabin)))
+
+# Get subset of complete records
+# and make train/validation subsets.
+Cabin.complete <- Titanic.train %>% dplyr::filter(!is.na(Cabin))
+n_samples <- floor(0.80 * nrow(Cabin.complete))
+indices <- sample(1:nrow(Cabin.complete), size = n_samples)
+(Cabin.complete %<>%
+  dplyr::mutate(Subset = dplyr::if_else(dplyr::row_number() %in% indices, "Train", "Validation")) %>%
+  dplyr::mutate(Response = ifelse(Subset == "Validation", NA, Cabin)))
+```
+```{r impute-other-cabin}
+impute.unknown.cabin <- function(x) {
+  result <- Cabin.complete %>%
+    dplyr::mutate(Response = ifelse(Subset == "Validation", "Unknown", Response))
+  result.table <- xtabs(~ Cabin + Response, result)
+  result %>%
+    dplyr::summarise(
+        Accuracy = mean(Cabin == Response),
+        Error = mean(Cabin != Response),
+        n_miss = sum(is.na(Response))
+    ) %>% dplyr::mutate(Formula = "Impute 'Unknown'") %>%
+    return()
+}
+
+dplyr::bind_rows(list(
+    impute.unknown.cabin()
+)) %>% dplyr::arrange(Error, desc(Accuracy))
+```
+
+### `Fare`
+
+#### Missingness Summary
+
+```{r impute-summary-fare}
+Titanic.df %>% dplyr::select(Subset, Fare) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+#### Associated Features
+
+```{r impute-corr-fare}
+writeLines("Correlation: ")
+cor.test(~ Fare + Age, data = Titanic.df)
+cor.test(~ Fare + SibSp, data = Titanic.df)
+cor.test(~ Fare + Parch, data = Titanic.df)
+
+writeLines("ANOVA: ")
+sjstats::anova_stats(aov(Fare ~ Name, data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ Pclass, data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ Embarked, data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ Ticket, data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ Survived, data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ factor(SibSp), data = Titanic.df))
+sjstats::anova_stats(aov(Fare ~ factor(Parch), data = Titanic.df))
+```
+
+#### Imputation Candidates
+
+```{r impute-baseline-fare}
+# Get subset of missing records.
+(Fare.miss <- Titanic.df %>%
+  dplyr::filter(is.na(Fare)))
+
+# Get subset of complete records
+# and make train/validation subsets.
+Fare.complete <- Titanic.train %>% dplyr::filter(!is.na(Fare))
+n_samples <- floor(0.80 * nrow(Fare.complete))
+indices <- sample(1:nrow(Fare.complete), size = n_samples)
+(Fare.complete %<>%
+  dplyr::mutate(Subset = dplyr::if_else(dplyr::row_number() %in% indices, "Train", "Validation")) %>%
+  dplyr::mutate(Response = ifelse(Subset == "Validation", NA, Fare)))
+```
+
+
+```{r impute-median-fare}
+impute.median.fare <- function(x, data) {
+    return(Fare.complete %>%
+        simputation::impute_median(x) %>%
+        dplyr::mutate(Residuals = Fare - Response) %>%
+        dplyr::summarise(
+            MSE = mean(Residuals**2, na.rm = TRUE),
+            RMSE = sqrt(MSE),
+            MAE = mean(abs(Residuals), na.rm = TRUE),
+            n_miss = sum(is.na(Response))
+        ) %>% dplyr::mutate(Formula = deparse(x)))
+}
+
+dplyr::bind_rows(list(
+    impute.median.fare(Response ~ Survived),
+    impute.median.fare(Response ~ Pclass),
+    impute.median.fare(Response ~ SibSp),
+    impute.median.fare(Response ~ Parch),
+    impute.median.fare(Response ~ Survived | Pclass)
+)) %>% dplyr::arrange(MSE, RMSE, MAE)
+```
+
+```{r impute-lm-fare}
+impute.lm.fare <- function(x, data) {
+    return(Fare.complete %>%
+        simputation::impute_lm(x) %>%
+        dplyr::mutate(Residuals = Fare - Response) %>%
+        dplyr::summarise(
+            MSE = mean(Residuals**2),
+            RMSE = sqrt(MSE),
+            MAE = mean(abs(Residuals)),
+            n_miss = sum(is.na(Response))
+        ) %>% dplyr::mutate(Formula = deparse(x)))
+}
+
+dplyr::bind_rows(list(
+    impute.lm.fare(Response ~ Survived | Pclass),
+    impute.lm.fare(Response ~ Pclass),
+    impute.lm.fare(Response ~ Survived + Pclass + SibSp + Parch),
+    impute.lm.fare(Response ~ Pclass + SibSp + Parch + Sex | Survived),
+    impute.lm.fare(Response ~ Pclass + SibSp + Parch | Survived + Sex),
+    impute.lm.fare(Response ~ SibSp + Parch | Survived + Sex + Pclass),
+    impute.lm.fare(Response ~ SibSp + Parch + Fare | Survived + Sex + Pclass),
+    impute.lm.fare(Response ~ SibSp + Parch + Fare | Survived + Sex + Pclass)
+)) %>% dplyr::arrange(MSE, RMSE, MAE)
+```
+
+
+### `Embarked`
+
+#### Missingness Summary
+
+```{r impute-summary-embarked}
+Titanic.df %>% dplyr::select(Subset, Embarked) %>% dplyr::group_by(Subset) %>% naniar::miss_var_summary()
+```
+
+#### Associated Features
+
+```{r impute-corr-embarked}
+writeLines("Kruskal-Wallis Tests: ")
+kruskal.test(Age ~ Embarked, data = Titanic.df)
+kruskal.test(SibSp ~ Embarked, data = Titanic.df)
+kruskal.test(Parch ~ Embarked, data = Titanic.df)
+
+writeLines("ANOVA: ")
+summary(glm(Survived ~ 0 + Embarked, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ 0 + Pclass, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ 0 + Sex, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ 0 + Cabin, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ Age, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ SibSp, data = Cabin.known, family = "binomial"))
+summary(glm(Embarked ~ Parch, data = Cabin.known, family = "binomial"))
+```
+
+#### Imputation Candidates
+
+```{r impute-baseline-embarked}
+# Get subset of missing records.
+(Embarked.miss <- Titanic.df %>%
+  dplyr::filter(is.na(Fare)))
+
+# Get subset of complete records
+# and make train/validation subsets.
+Embarked.complete <- Titanic.train %>% dplyr::filter(!is.na(Embarked))
+n_samples <- floor(0.80 * nrow(Embarked.complete))
+indices <- sample(1:nrow(Embarked.complete), size = n_samples)
+(Embarked.complete %<>%
+  dplyr::mutate(Subset = dplyr::if_else(dplyr::row_number() %in% indices, "Train", "Validation")) %>%
+  dplyr::mutate(Response = as.factor(Embarked), Response = factor(ifelse(Subset == "Validation", NA, Response), labels = c("S", "C", "Q"))))
+```
+
+```{r impute-constant-embarked}
+impute.constant.embarked <- function(x) {
+  result <- Embarked.complete %>%
+    dplyr::mutate(Response = ifelse(Subset == "Validation", "S", Response))
+  result.table <- xtabs(~ Embarked + Response, result)
+  result %>%
+    dplyr::summarise(
+        Accuracy = mean(Embarked == Response),
+        Error = mean(Embarked != Response),
+        n_miss = sum(is.na(Response))
+    ) %>% dplyr::mutate(Formula = "Impute 'Unknown'", Method = "Constant 'S'") %>%
+    return()
+}
+
+dplyr::bind_rows(list(
+    impute.constant.embarked()
+)) %>% dplyr::arrange(Error, desc(Accuracy))
+```
+
+```{r impute-model-embarked}
+impute.model.embarked <- function(x, data, model, model.name = deparse(substitute(model)), ...) {
+  
+  # Prepare model data (with certain fields temporarily imputed for testing purposes).
+  data.train <- data %>%
+    dplyr::filter(Subset == "Train") %>%
+    dplyr::mutate(Age = dplyr::coalesce(Age, median(Age, na.rm = TRUE)), 
+                  Fare = dplyr::coalesce(Fare, median(Fare, na.rm = TRUE)),
+                  Cabin = dplyr::coalesce(Cabin, "Unknown"))
+  
+  data.test <- data %>%
+    dplyr::filter(Subset == "Validation") %>%
+    dplyr::mutate(Age = dplyr::coalesce(Age, median(Age, na.rm = TRUE)), 
+                  Fare = dplyr::coalesce(Fare, median(Fare, na.rm = TRUE)), 
+                  Cabin = dplyr::coalesce(Cabin, "Unknown")) %>% dplyr::select(-Response)
+  
+  # Fit imputation model.
+  model.fit <- do.call(model, list(formula = x, data = data.train), quote = TRUE)
+  
+  # Make predictions.
+  predictions <- dplyr::tibble(
+    PassengerId = data.test %>% dplyr::pull(PassengerId),
+    Response = factor(predict(model.fit, newdata = data.test))
+  )
+
+  # Impute missing values.
+  result <- data %>%
+    dplyr::rows_patch(y = predictions, by = "PassengerId")
+  
+  result.table <- xtabs(~ Embarked + Response, result)
+  result %>%
+    dplyr::summarise(
+        Accuracy = mean(Embarked == Response),
+        Error = mean(Embarked != Response),
+        n_miss = sum(is.na(Response))
+    ) %>% dplyr::mutate(Formula = deparse(x), Method = model.name) %>%
+    return()
+}
+
+dplyr::bind_rows(list(
+    impute.model.embarked(Embarked ~ Survived, Embarked.complete, randomForest::randomForest),
+    impute.model.embarked(Embarked ~ Pclass + Sex + Survived, Embarked.complete, randomForest::randomForest),
+    impute.model.embarked(Embarked ~ Pclass + Sex + Fare + SibSp + Parch, Embarked.complete, randomForest::randomForest),
+    impute.model.embarked(Embarked ~ Pclass + Sex + Age + Fare + SibSp + Parch, Embarked.complete, randomForest::randomForest)
+    
+)) %>% dplyr::arrange(Error, desc(Accuracy))
+```
+
+
+

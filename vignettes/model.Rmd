@@ -1,0 +1,78 @@
+---
+title: "Titanic (Kaggle Competition): Model Performance"
+output: 
+  # Output as a previewable HTML Notebook.
+  html_notebook:
+    theme: united
+    highlight: tango
+    df_print: paged
+    toc: true
+    toc_depth: 3
+  # Output as an rmarkdown::pdf_document()
+  pdf_document:
+    keep_tex: true
+    highlight: tango
+    fig_caption: true
+    df_print: kable
+    toc: true
+    toc_depth: 3
+# pandoc -> pdfLaTeX rendering options:
+fontsize: 11pt
+geometry:
+  - margin=1in
+  - heightrounded
+documentclass: scrartcl
+papersize: a4
+urlcolor: violet
+toccolor: blue
+---
+
+
+## Modelling Passenger Survival
+
+### Logistic Regression (with `glm`)
+
+### Feature Importance (with `randomForest`)
+
+### Classification Tuning (with Cross-Validation)
+
+## Resources
+
+The following resources were referenced while completing this assignment.
+
+- [Kaggle: Titanic Competition](https://www.kaggle.com/c/titanic/overview)
+
+- [ANOVA](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/anova/)
+- [One-way ANOVA](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/one-way-anova/)
+
+- [Kruskal-Wallis Test](https://www.statisticssolutions.com/free-resources/directory-of-statistical-analyses/kruskal-wallis-test/)
+
+
+<!-- 
+    - Correlation Reference: https://stats.stackexchange.com/questions/484299/how-to-check-the-correlation-between-categorical-and-numeric-independent-variabl
+    - Visualization: http://www.sthda.com/english/wiki/correlation-test-between-two-variables-in-r#visualize-your-data-using-scatter-plots 
+-->
+
+
+We can also perform a two-sample Wilcoxon signed rank test to see if 
+
+
+We can also perform the two-sample Wilcoxon rank sum test to see if there's a change in `Survived` based on `PassengerId`.
+
+```
+Titanic.alive <- Titanic.train %>%
+  dplyr::filter(Survived == "Survived") %>%
+  dplyr::pull(PassengerId)
+Titanic.dead <- Titanic.train %>%
+  dplyr::filter(Survived == "Died") %>%
+  dplyr::pull(PassengerId)
+(wt <- wilcox.test(Titanic.alive, Titanic.dead))
+writeLines(sprintf("Significant (P-value < 0.05)? %s", wt$p.value < 0.05))
+```
+
+```
+(kt <- kruskal.test(Survived ~ Pclass, Titanic.train))
+writeLines(c("null hypothesis: groups are from identical populations",
+             "alternative hypothesis: at least one group is from a different population",
+             sprintf("Significant (P-value < 0.05)? %s", kt$p.value < 0.05)))
+```
