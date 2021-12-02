@@ -7,9 +7,19 @@ source(here::here("R/utilities.R"))
 ## Imports ----
 
 library(dplyr)
+library(tidyr)
 library(naniar)
 
 ## Exports ----
+
+#' Regex pattern constants.
+PATTERNS <<- list(
+    Name = "^(.+?(?=,))(?>,\\s+)(.+?\\.)(?>\\s+)(.*?(?=\\t|$|\\s\\())(?|(?=\\t|$)()(?:.*?(?=$))|(?:\\s\\(?)(.*?(?=\\)))(?:.*?(?=$)))",
+    Ticket = "",
+    CabinList = "\\s",
+    CabinDeck = ".+?",
+    CabinNumber = "\\d+"
+)
 
 #' Environment for feature extractors.
 Engineer <<- new.env(parent = emptyenv())
@@ -47,7 +57,36 @@ Engineer$update <- function(df) {
 
 ### Engineering ----
 
-#' Engineer AgeKnown.
+#### Name ----
+
+#' Use a regex pattern to match components in the `Name` feature.
+Engineer$NameComponents <- Util$task(
+    "Regex: Name Components",
+    task = (function() {
+        #' Match against the names.
+        NameComponent.matches <- regexec(
+            PATTERNS$Name,
+            Data$df %>% pull(Name),
+            perl = TRUE # For PRCE conditionals.
+        )
+    }),
+    onStart = "Matching for components in Name...")
+
+#' Extract the Surname.
+Engineer$Surname <- function(label = "Extract") {
+    Util$tag("Surname...", label = label)
+    Data$df %>%
+        mutate(Surname = str_split(Name, ",", n = 2)) %>%
+        unnest_wider(Surname, names_sep = "") %>%
+        rename(Surname = Surname1) %>%
+        select(-Surname2) %>%
+        print() %>%
+        Engineer$update()
+}
+
+#### Age ----
+
+#' Engineer AgeKnown
 Engineer$AgeKnown <- function(label = "Verify") {
     Util$tag("AgeKnown...", label = label)
     Data$df %>%
@@ -55,7 +94,7 @@ Engineer$AgeKnown <- function(label = "Verify") {
         Engineer$update()
 }
 
-#' Engineer AgeDiscrete.
+#' Engineer AgeDiscrete
 Engineer$AgeDiscrete <- function(label = "Cut") {
     Util$tag("AgeDiscrete...", label = label)
     Data$df %>%
@@ -67,7 +106,9 @@ Engineer$AgeDiscrete <- function(label = "Cut") {
         Engineer$update()
 }
 
-#' Engineer FareDiscrete.
+#### Fare ----
+
+#' Engineer FareDiscrete
 Engineer$FareDiscrete <- function(label = "Cut") {
     Util$tag("FareDiscrete...", label = label)
     Data$df %>%
@@ -78,13 +119,89 @@ Engineer$FareDiscrete <- function(label = "Cut") {
         Engineer$update()
 }
 
-#' Engineer FareRounded.
+#' Engineer FareRounded
 Engineer$FareRounded <- function(label = "Round") {
     Util$tag("FareRounded...", label = label)
     Data$df %>%
         mutate(FareRounded = round(Fare / 100, 1) * 100) %>%
         Engineer$update()
 }
+
+#### Cabin ----
+
+#' Engineer CabinKnown
+Engineer$CabinKnown <- function(label = "Verify") {
+    Util$tag("CabinKnown...", label = label)
+    Data$df %>%
+        mutate(CabinKnown = !is.na(Cabin)) %>%
+        Engineer$update()
+}
+
+#' Engineer Cabins
+Engineer$Cabins <- function(label = "Unnest") {
+    Util$tag("Cabin1:Cabin4...", label = label)
+    Data$df %>%
+        mutate(CabinList = str_split(Cabin, pattern = PATTERNS$CabinList)) %>%
+        unnest_wider(CabinList, names_sep = "") %>%
+        dplyr::rename(
+            Cabin1 = CabinList1,
+            Cabin2 = CabinList2,
+            Cabin3 = CabinList3,
+            Cabin4 = CabinList4) %>%
+        Engineer$update()
+}
+
+#' Engineer CabinDecks
+Engineer$CabinDecks <- function(label = "Unnest") {
+    Util$tag("Cabin1.Deck:Cabin4.Deck...", label = label)
+    Data$df %>%
+        mutate(across(
+            num_range("Cabin", 1:4),
+            list(Deck = ~ str_extract(.x, PATTERNS$CabinDeck)),
+            .names = "{.col}.{.fn}")
+        ) %>%
+        mutate(across(
+            starts_with("Cabin") & ends_with(".Deck"),
+            ~ factor(.x, levels = c("A", "B", "C", "D", "E", "F", "G", "?"), exclude = NA))
+        ) %>%
+        # mutate(across(
+        #    starts_with("Cabin") & ends_with(".Deck"),
+        #    ~ replace_na(.x, "?"))
+        # ) %>%
+        Engineer$update()
+}
+
+#' Engineer CabinNumbers
+Engineer$CabinNumbers <- function(label = "Unnest") {
+    Util$tag("Cabin1.Number:Cabin4.Number...", label = label)
+    Data$df %>%
+        mutate(across(
+            num_range("Cabin", 1:4),
+            list(Number = ~ str_extract(.x, PATTERNS$CabinNumber)),
+            .names = "{.col}.{.fn}")
+        ) %>%
+        mutate(across(
+            starts_with("Cabin") & ends_with(".Number"),
+            ~ as.integer(.x))
+        ) %>%
+        # mutate(across(
+        #    starts_with("Cabin") & ends_with(".Number"),
+        #    ~ replace_na(.x, -1))
+        # ) %>%
+        Engineer$update()
+}
+
+#' Engineer CabinCount
+Engineer$CabinCount <- function(label = "Count") {
+    Util$tag("CabinCount...", label = label)
+    Data$df %>%
+        rowwise() %>%
+        mutate(CabinCount = sum(!is.na(c_across(num_range("Cabin", 1:4))))) %>%
+        ungroup() %>%
+        Engineer$update()
+}
+
+#### Embarked ----
 
 #' Engineer EmbarkedKnown
 Engineer$EmbarkedKnown <- function(label = "Verify") {
@@ -94,8 +211,36 @@ Engineer$EmbarkedKnown <- function(label = "Verify") {
         Engineer$update()
 }
 
+## Extraction ----
+
 #' Extract features.
 Features$extract <- function() {
+
+    Util$task("Feature Eng.: Name",
+            task = (function(...){
+                Engineer$Surname(...)
+                Data$df %>% select(Name, Surname) %>%
+                    print() %>%
+                    miss_var_summary() %>% print()
+            }),
+            #    task = Util$stub(
+            #      "Title",
+            #      "Name",
+            #      "Given.Forename",
+            #      "Given.Middlename",
+            #      "Surname",
+            #      "Spouse.Forename",
+            #      "Spouse.Middlename",
+            #      "Spouse.Surname",
+            #      "IsMarried",
+            #      "Guardian.Forename",
+            #      "Guardian.Middlename",
+            #      "Guardian.Surname",
+            #      "IsGuardian"),
+            #  task.args = list(label = "Extract"),
+              onStart = "Extracting latent Ticket features...")
+
+    stop()
 
     Util$task("Feature Eng.: Age",
               task = (function(...){
@@ -126,16 +271,22 @@ Features$extract <- function() {
               }),
               onStart = "Extracting latent Embarked features...")
 
-    stop()
-
     Util$task("Feature Eng.: Cabin",
-              task = Util$stub(
-                  "CabinKnown...",
-                  "Cabin.#...",
-                  "Cabin.#.Deck...",
-                  "Cabin.#.Number...",
-                  "Cabin.Count"),
-              task.args = list(label = "Extract"),
+              task = (function(...){
+                  Engineer$CabinKnown(...)
+                  Engineer$Cabins(...)
+                  Engineer$CabinDecks(...)
+                  Engineer$CabinNumbers(...)
+                  Engineer$CabinCount(...)
+                  Data$df %>% select(
+                      Cabin, CabinKnown,
+                      Engineer$name_range(prefix = "Cabin", range = 1:4),
+                      Engineer$name_range(prefix = "Cabin", range = 1:4, suffix = ".Deck"),
+                      Engineer$name_range(prefix = "Cabin", range = 1:4, suffix = ".Number")
+                      ) %>%
+                      print() %>%
+                      miss_var_summary() %>% print()
+              }),
               onStart = "Extracting latent Cabin features...")
 
     Util$task("Feature Eng.: Ticket",
@@ -147,27 +298,9 @@ Features$extract <- function() {
               task.args = list(label = "Extract"),
               onStart = "Extracting latent Ticket features...")
 
-    Util$task("Feature Eng.: Name",
-              task = Util$stub(
-                  "Title",
-                  "Name",
-                  "Given.Forename",
-                  "Given.Middlename",
-                  "Surname",
-                  "Spouse.Forename",
-                  "Spouse.Middlename",
-                  "Spouse.Surname",
-                  "IsMarried",
-                  "Guardian.Forename",
-                  "Guardian.Middlename",
-                  "Guardian.Surname",
-                  "IsGuardian"),
-              task.args = list(label = "Extract"),
-              onStart = "Extracting latent Ticket features...")
-
 }
 
-### Imputation ----
+## Imputation ----
 
 #' Impute missing values.
 Features$impute <- function() {
