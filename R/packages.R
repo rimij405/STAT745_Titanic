@@ -20,10 +20,10 @@ verify.package <- function(name, quiet = TRUE) {
     out <- tryCatch(
         expr = {
             if(!(name %in% installed.packages()[,"Package"])) {
-                warning(sprintf("Package '%s' has not been installed.\n", name))
+                warning(sprintf("Package '%s' has not been installed.", name))
             } else {
                 if(!quiet) {
-                    message(sprintf("Package '%s' is already installed.\n", name))
+                    message(sprintf("Package '%s' is already installed.", name))
                 }
             }
         },
@@ -43,7 +43,7 @@ verify.package <- function(name, quiet = TRUE) {
                 error = function(cond) {
                     if(!quiet) {
                         message(cond);
-                        cat("\n\n");
+                        cat("\n");
                     }
                     return(FALSE)
                 }

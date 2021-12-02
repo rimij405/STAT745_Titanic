@@ -103,7 +103,9 @@ Data$FEATURETYPES <- Data$FIELDTYPES %>%
 
 #' Load the training subset.
 Load$subset.train <- function() {
-    Util$notify("Loading training subset...")
+    Util$log("Loading training subset...")
+    sink(tempfile())
+    on.exit(sink(NULL))
     Data$train <- read_csv(
         file = Data$FILENAMES$train,
         col_names = names(Data$FIELDS),
@@ -118,7 +120,9 @@ Load$subset.train <- function() {
 
 #' Load the testing subset.
 Load$subset.test <- function() {
-    Util$notify("Loading test subset...")
+    Util$log("Loading test subset...")
+    sink(tempfile())
+    on.exit(sink(NULL))
     Data$test <- read_csv(
         file = Data$FILENAMES$test,
         col_names = names(Data$FEATURES),
@@ -129,16 +133,45 @@ Load$subset.test <- function() {
     return(Data$test)
 }
 
-#' Load the training and testing subsets.
-Load$dataset <- function() {
-    train_df <- Load$subset.train()
-    test_df <- Load$subset.test() %>% mutate(Survived = NA)
-    Util$notify("Combining subsets into Titanic superset...")
+#' Combine the train and test subsets.
+Load$combine <- function(train_df, test_df) {
+    Util$log("Combining subsets into Titanic superset...")
     Data$df <- list(
             TRAIN = train_df,
-            TEST = test_df) %>%
+            TEST = test_df %>%
+                mutate(Survived = NA)) %>%
         bind_rows(.id = "Subset")
     Data$X_df <- Data$df %>% select(-Survived)
     Data$y_df <- Data$df %>% select(Survived)
+    return(Data$df)
+}
+
+#' Load the training and testing subsets.
+Load$dataset <- function() {
+
+    train_df <- Util$task("Loader: Train subset",
+                          task = Load$subset.train,
+                          verbose = TRUE)
+
+    test_df <- Util$task("Loader: Test subset",
+                         task = Load$subset.test,
+                         verbose = TRUE)
+
+    train_samples <- nrow(train_df)
+    test_samples <- nrow(test_df)
+    n_samples <- sum(train_samples, test_samples)
+
+    Util$task("Loader: Make superset",
+                task = Load$combine,
+                task.args = list(
+                    train_df = train_df,
+                    test_df = test_df
+                ),
+                onStart = sprintf("Combining %i training and %i test samples (n = %i).",
+                                  train_samples, test_samples, n_samples),
+                onComplete = sprintf("Loaded %i rows and %i columns (%i feature(s)).",
+                                     nrow(Data$df), ncol(Data$df), ncol(Data$X_df)))
+
+    # Return dataframe.
     return(Data$df)
 }

@@ -25,32 +25,32 @@ Util$border <- function(border = "-", width = 10, n = 1, indent = 0) {
 
 #' Print a log message.
 Util$log <- function(label = "SECTION LABEL:", width = max(str_length(label), 60)) {
-    cat(str_wrap(string = c(label), width = width), sep = "\n")
+    writeLines(str_c(str_wrap(string = c(label), width = width)))
 }
 
 #' stub function.
 Util$stub <- function(...) {
     return(function(label = "Stub") {
-        message(sprintf("[%s]: %s\n", label, list(...)))
+        message(str_c(sprintf("[%s]: %s", label, list(...)), collapse = "\n"))
     })
 }
 
 #' tag function.
 Util$tag <- function(..., label = "Stub"){
-    message(sprintf("[%s]: %s\n", label, list(...)))
+    message(str_c(sprintf("[%s]: %s", label, list(...)), collapse = "\n"))
 }
 
 #' Print a bordered section label.
 Util$section <- function(label = "SECTION LABEL:", border = "-", width = str_length(label), border_n = 1) {
     Util$border(border, width = width, n = border_n)
-    cat(str_wrap(string = c(label), width = width), sep = "\n")
+    cat(str_wrap(string = c(label), width = width))
     Util$border(border, width = width, n = border_n)
 }
 
 #' Print a bordered section label.
 Util$header <- function(label = "HEADER LABEL:", border = "=", width = str_length(label), border_n = 1, level = 0) {
     Util$border(border, width = width, n = border_n, indent = level)
-    cat(str_wrap(string = c(label), width = width, indent = level), sep = "\n")
+    cat(str_wrap(string = c(label), width = width, indent = level))
 }
 
 ### Task Orchestration ----
@@ -59,7 +59,15 @@ Util$header <- function(label = "HEADER LABEL:", border = "=", width = str_lengt
 Util$tic <- function(label = "tic", width = 60, ...) { tic(label); Util$border(width = width); }
 
 #' toc function with border.
-Util$toc <- function(quiet = TRUE, width = 60, ...) { toc(quiet = quiet); Util$border(width = width); }
+Util$toc <- function(quiet = TRUE, width = 60, ...) {
+    toc.tuple <- toc(quiet = TRUE)
+    toc.msg <- toc.tuple$msg
+    toc.elapsed <- toc.tuple$toc - toc.tuple$tic
+    if (!quiet) {
+        cat(sprintf("%s: %.2f sec elapsed\n", toc.msg, toc.elapsed))
+    }
+    Util$border("~", width = width)
+}
 
 #' Timed call.
 Util$task <- function(label, task,

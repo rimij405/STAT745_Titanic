@@ -6,6 +6,8 @@ source(here::here("R/utilities.R"))
 
 ## Imports ----
 
+library(dplyr)
+library(naniar)
 
 ## Exports ----
 
@@ -25,29 +27,106 @@ Engineer$name_range <- function(prefix = "X", range = 1:5, suffix = NULL, sep = 
     return(c(sprintf(name.format, range)))
 }
 
+#' Update the dependent sets.
+Engineer$update <- function(df) {
+    # Update dataset.
+    Data$df <- df
+    Data$X_df <- Data$df %>% select(-Survived)
+    Data$y_df <- Data$df %>% select(Survived)
+
+    # Update training subset.
+    Data$train <- Data$df %>% filter(Subset == "TRAIN")
+    Data$X_train <- Data$train %>% select(-Survived)
+    Data$y_train <- Data$train %>% select(Survived)
+
+    # Update test subset.
+    Data$test <- Data$df %>% filter(Subset == "TEST")
+    Data$X_test <- Data$test %>% select(-Survived)
+    Data$y_test <- Data$test %>% select(Survived)
+}
+
 ### Engineering ----
+
+#' Engineer AgeKnown.
+Engineer$AgeKnown <- function(label = "Verify") {
+    Util$tag("AgeKnown...", label = label)
+    Data$df %>%
+        mutate(AgeKnown = (!(is.na(Age) | Age != round(Age) & Age > 1))) %>%
+        Engineer$update()
+}
+
+#' Engineer AgeDiscrete.
+Engineer$AgeDiscrete <- function(label = "Cut") {
+    Util$tag("AgeDiscrete...", label = label)
+    Data$df %>%
+        mutate(AgeDiscrete = cut(
+            Age,
+            breaks = c(-Inf, 1, 17, 25, 30, 50, Inf),
+            right = TRUE, ordered_result= TRUE)
+            ) %>%
+        Engineer$update()
+}
+
+#' Engineer FareDiscrete.
+Engineer$FareDiscrete <- function(label = "Cut") {
+    Util$tag("FareDiscrete...", label = label)
+    Data$df %>%
+        mutate(FareDiscrete = cut(Fare,
+                breaks = c(-Inf, seq(0, 550, by = 50), Inf),
+                right = TRUE, ordered_result= TRUE)
+               ) %>%
+        Engineer$update()
+}
+
+#' Engineer FareRounded.
+Engineer$FareRounded <- function(label = "Round") {
+    Util$tag("FareRounded...", label = label)
+    Data$df %>%
+        mutate(FareRounded = round(Fare / 100, 1) * 100) %>%
+        Engineer$update()
+}
+
+#' Engineer EmbarkedKnown
+Engineer$EmbarkedKnown <- function(label = "Verify") {
+    Util$tag("EmbarkedKnown...", label = label)
+    Data$df %>%
+        mutate(EmbarkedKnown = !is.na(Embarked)) %>%
+        Engineer$update()
+}
 
 #' Extract features.
 Features$extract <- function() {
 
     Util$task("Feature Eng.: Age",
-              task = Util$stub(
-                  "AgeKnown...",
-                  "AgeDiscrete..."),
-              task.args = list(label = "Extract"),
+              task = (function(...){
+                  Engineer$AgeKnown(...)
+                  Engineer$AgeDiscrete(...)
+                  Data$df %>% select(Age, AgeKnown, AgeDiscrete) %>%
+                      print() %>%
+                      miss_var_summary() %>% print()
+              }),
               onStart = "Extracting latent Age features...")
 
     Util$task("Feature Eng.: Fare",
-              task = Util$stub(
-                  "FareDiscrete..."),
-              task.args = list(label = "Extract"),
+              task = (function(...){
+                  Engineer$FareRounded(...)
+                  Engineer$FareDiscrete(...)
+                  Data$df %>% select(Fare, FareRounded, FareDiscrete) %>%
+                      print() %>%
+                      miss_var_summary() %>% print()
+              }),
               onStart = "Extracting latent Fare features...")
 
     Util$task("Feature Eng.: Embarked",
-              task = Util$stub(
-                  "EmbarkedKnown..."),
-              task.args = list(label = "Extract"),
-              onStart = "Extracting latent Fare features...")
+              task = (function(...){
+                  Engineer$EmbarkedKnown(...)
+                  Data$df %>% select(Embarked, EmbarkedKnown) %>%
+                      print() %>%
+                      miss_var_summary() %>% print()
+              }),
+              onStart = "Extracting latent Embarked features...")
+
+    stop()
 
     Util$task("Feature Eng.: Cabin",
               task = Util$stub(
