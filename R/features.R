@@ -30,6 +30,25 @@ Engineer$name_range <- function(prefix = "X", range = 1:5, suffix = NULL, sep = 
 #' Extract features.
 Features$extract <- function() {
 
+    Util$task("Feature Eng.: Age",
+              task = Util$stub(
+                  "AgeKnown...",
+                  "AgeDiscrete..."),
+              task.args = list(label = "Extract"),
+              onStart = "Extracting latent Age features...")
+
+    Util$task("Feature Eng.: Fare",
+              task = Util$stub(
+                  "FareDiscrete..."),
+              task.args = list(label = "Extract"),
+              onStart = "Extracting latent Fare features...")
+
+    Util$task("Feature Eng.: Embarked",
+              task = Util$stub(
+                  "EmbarkedKnown..."),
+              task.args = list(label = "Extract"),
+              onStart = "Extracting latent Fare features...")
+
     Util$task("Feature Eng.: Cabin",
               task = Util$stub(
                   "CabinKnown...",
@@ -59,13 +78,55 @@ Features$extract <- function() {
                   "Spouse.Forename",
                   "Spouse.Middlename",
                   "Spouse.Surname",
+                  "IsMarried",
                   "Guardian.Forename",
                   "Guardian.Middlename",
                   "Guardian.Surname",
-                  "Relationship"),
+                  "IsGuardian"),
               task.args = list(label = "Extract"),
               onStart = "Extracting latent Ticket features...")
 
 }
 
+### Imputation ----
 
+#' Impute missing values.
+Features$impute <- function() {
+
+    Util$task("Impute: Age",
+              task = Util$stub(
+                  "Age...",
+                  "AgeDiscrete..."),
+              task.args = list(label = "Impute"),
+              onStart = "Imputing missing values in ...")
+
+    Util$task("Impute: Fare",
+              task = Util$stub(
+                  "Fare...",
+                  "FareDiscrete..."),
+              task.args = list(label = "Impute"),
+              onStart = "Imputing missing values in ...")
+
+    Util$task("Impute: Fare",
+              task = Util$stub(
+                  "Fare...",
+                  "FareDiscrete..."),
+              task.args = list(label = "Impute"),
+              onStart = "Imputing missing values in ...")
+
+    Util$task("Impute: Cabin",
+              task = Util$stub(
+                  "Cabin.1.Deck...",
+                  "Cabin.1.Number...",
+                  "Cabin.1...",
+                  "Cabin..."),
+              task.args = list(label = "Impute"),
+              onStart = "Imputing missing values in ...")
+
+    Util$task("Impute: Embarked",
+              task = Util$stub(
+                  "Embarked..."),
+              task.args = list(label = "Impute"),
+              onStart = "Imputing missing values in ...")
+
+}

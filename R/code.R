@@ -33,18 +33,7 @@ source(here::here("R/loader.R"))
 source(here::here("R/features.R"))
 
 ### Model Learning ----
-
-Model <<- new.env(parent = emptyenv())
-
-### Model Validation ----
-
-Analyse <<- new.env(parent = emptyenv())
-
-### Prediction ----
-
-Predict <<- new.env(parent = emptyenv())
-
-
+source(here::here("R/models.R"))
 
 ## Pipeline Composer ----
 
@@ -74,6 +63,21 @@ Pipeline$execute <- function(verbose = VERBOSE) {
     Util$task("Data Imputation",
               task = Features$impute,
               onStart = "Imputing missing values for dataset...")
+
+    # Fit models on the prepared dataset.
+    Util$task("Model Fitting",
+              task = Models$fit,
+              onStart = "Fitting models with imputed dataset...")
+
+    # Make predictions with fitted models.
+    Util$task("Model Predictions",
+              task = Models$predict,
+              onStart = "Fitting models with imputed dataset...",
+              onComplete = (function(x) {
+                              fs::dir_tree(x, regexp = "*submission*")
+                              return(sprintf("Find exported predictions in %s", x))
+                            })(here::here("data"))
+              )
 
 }
 

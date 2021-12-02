@@ -24,8 +24,20 @@ Util$border <- function(border = "-", width = 10, n = 1, indent = 0) {
 }
 
 #' Print a log message.
-Util$log <- function(label = "SECTION LABEL:", width = str_length(label)) {
+Util$log <- function(label = "SECTION LABEL:", width = max(str_length(label), 60)) {
     cat(str_wrap(string = c(label), width = width), sep = "\n")
+}
+
+#' stub function.
+Util$stub <- function(...) {
+    return(function(label = "Stub") {
+        message(sprintf("[%s]: %s\n", label, list(...)))
+    })
+}
+
+#' tag function.
+Util$tag <- function(..., label = "Stub"){
+    message(sprintf("[%s]: %s\n", label, list(...)))
 }
 
 #' Print a bordered section label.
@@ -48,13 +60,6 @@ Util$tic <- function(label = "tic", width = 60, ...) { tic(label); Util$border(w
 
 #' toc function with border.
 Util$toc <- function(quiet = TRUE, width = 60, ...) { toc(quiet = quiet); Util$border(width = width); }
-
-#' stub function.
-Util$stub <- function(...) {
-    return(function(label = "Stub"){
-        message(sprintf("[%s]: %s\n", label, list(...)))
-    })
-}
 
 #' Timed call.
 Util$task <- function(label, task,

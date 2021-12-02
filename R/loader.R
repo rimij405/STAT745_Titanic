@@ -111,8 +111,8 @@ Load$subset.train <- function() {
         skip = 1) %>%
         dplyr::mutate(
             Survived = factor(Survived, labels = c("Died", "Survived")))
-    Data$X.train <- Data$train %>% select(-Survived)
-    Data$Y.train <- Data$train %>% select(Survived)
+    Data$X_train <- Data$train %>% select(-Survived)
+    Data$Y_train <- Data$train %>% select(Survived)
     return(Data$train)
 }
 
@@ -124,21 +124,21 @@ Load$subset.test <- function() {
         col_names = names(Data$FEATURES),
         col_types = Data$FEATURETYPES,
         skip = 1)
-    Data$X.test <- Data$test %>% select(everything())
-    Data$Y.test <- Data$test %>% transmute(Survived = NA)
+    Data$X_test <- Data$test %>% select(everything())
+    Data$y_test <- Data$test %>% transmute(Survived = NA)
     return(Data$test)
 }
 
 #' Load the training and testing subsets.
 Load$dataset <- function() {
-    train.df <- Load$subset.train()
-    test.df <- Load$subset.test() %>% mutate(Survived = NA)
+    train_df <- Load$subset.train()
+    test_df <- Load$subset.test() %>% mutate(Survived = NA)
     Util$notify("Combining subsets into Titanic superset...")
     Data$df <- list(
-            TRAIN = train.df,
-            TEST = test.df) %>%
+            TRAIN = train_df,
+            TEST = test_df) %>%
         bind_rows(.id = "Subset")
-    Data$X.df <- Data$df %>% select(-Survived)
-    Data$Y.df <- Data$df %>% select(Survived)
+    Data$X_df <- Data$df %>% select(-Survived)
+    Data$y_df <- Data$df %>% select(Survived)
     return(Data$df)
 }
