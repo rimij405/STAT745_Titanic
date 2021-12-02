@@ -27,6 +27,62 @@ urlcolor: violet
 toccolor: blue
 ---
 
+```{r setup, include=FALSE}
+# Set the root directory.
+knitr::opts_knit$set(root.dir = here::here(""))
+
+# Set the chunk options.
+knitr::opts_chunk$set(
+    ## ---- Formatting Options ----
+    comment = "",
+    include = TRUE,
+    collapse = TRUE,
+    echo = TRUE,
+    strip.white = TRUE,
+    
+    ## ---- Output Options ----
+    message = TRUE,
+    warning = TRUE,
+    error = TRUE,
+    results = 'markup',
+    
+    ## ---- Display Options ----
+    fig.height = 4,
+    fig.width = 6
+)
+
+# Source loader file.
+source(here::here("R/loader.R"))
+load.data()
+```
+
+This report contains model performance details about the Titanic prediction models.
+
+## Setup
+
+Our investigation makes use of several R packages that made it easier to summarize, visualize, manipulate, model, and impute missing data. These packages are specified below.
+
+```{r load-packages, include=TRUE, echo=FALSE}
+library(magrittr) # Attached for the `%>%` (pipe) and `extract` functions.
+
+loadNamespace("renv")    # Project dependency tracker for collaboration.
+loadNamespace("here")    # Used for obtaining paths relative to project root.
+loadNamespace("readr")   # Tidyverse data reader.
+loadNamespace("tidyr")   # Tidyverse data wrangler.
+loadNamespace("qqplotr") # For plotting quantile-quantile plots.
+loadNamespace("ggmosaic") # For plotting mosaic plots.
+loadNamespace("visdat")  # For visualization of data.
+loadNamespace("ltm")     # For EDA.
+loadNamespace("sjstats") # For EDA.
+loadNamespace("vcd")     # For EDA.
+loadNamespace("skimr")   # For finding statistical summaries.
+loadNamespace("naniar")  # Handle NA values in a tabular format.
+loadNamespace("simputation")  # Missing data imputation.
+loadNamespace("e1071")   # For classification.
+loadNamespace("randomForest") # For classification.
+loadNamespace("neuralnet")    # For deep learning.
+```
+
 
 ## Modelling Passenger Survival
 

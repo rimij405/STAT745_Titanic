@@ -27,8 +27,284 @@ urlcolor: violet
 toccolor: blue
 ---
 
+```{r setup, include=FALSE}
+# Set the root directory.
+knitr::opts_knit$set(root.dir = here::here(""))
+
+# Set the chunk options.
+knitr::opts_chunk$set(
+    ## ---- Formatting Options ----
+    comment = "",
+    include = TRUE,
+    collapse = TRUE,
+    echo = TRUE,
+    strip.white = TRUE,
+    
+    ## ---- Output Options ----
+    message = TRUE,
+    warning = TRUE,
+    error = TRUE,
+    results = 'markup',
+    
+    ## ---- Display Options ----
+    fig.height = 4,
+    fig.width = 6
+)
+
+# Source loader file.
+source(here::here("R/loader.R"))
+load.data()
+```
+
+This report contains feature engineering details about the Titanic prediction models.
+
+## Setup
+
+Our investigation makes use of several R packages that made it easier to summarize, visualize, manipulate, model, and impute missing data. These packages are specified below.
+
+```{r load-packages, include=TRUE, echo=FALSE}
+library(magrittr) # Attached for the `%>%` (pipe) and `extract` functions.
+
+loadNamespace("renv")    # Project dependency tracker for collaboration.
+loadNamespace("here")    # Used for obtaining paths relative to project root.
+loadNamespace("readr")   # Tidyverse data reader.
+loadNamespace("tidyr")   # Tidyverse data wrangler.
+loadNamespace("qqplotr") # For plotting quantile-quantile plots.
+loadNamespace("ggmosaic") # For plotting mosaic plots.
+loadNamespace("visdat")  # For visualization of data.
+loadNamespace("ltm")     # For EDA.
+loadNamespace("sjstats") # For EDA.
+loadNamespace("vcd")     # For EDA.
+loadNamespace("skimr")   # For finding statistical summaries.
+loadNamespace("naniar")  # Handle NA values in a tabular format.
+loadNamespace("simputation")  # Missing data imputation.
+loadNamespace("e1071")   # For classification.
+loadNamespace("randomForest") # For classification.
+loadNamespace("neuralnet")    # For deep learning.
+```
+
+```{r feature-utilities}
+make.names_range <- function(prefix = "X", 
+                             range = 1:5,
+                             suffix = "", 
+                             sep = "",
+                             width = 1) {
+    width.format <- sprintf("%%0%dd", width)
+    name.format <- paste(c(prefix, width.format, suffix), collapse = sep)
+    return(c(sprintf(name.format, range)))
+}
+make.names_range("Cabin", 1:4, "Deck", sep = ".", width = 1)
+```
+
+
 ## Feature Engineering
-### `Deck` (extracted from `Cabin`)
+
+### Latent Features in `Cabin`
+
+```{r feature-cabin}
+# Neat little extraction function for handling Cabin numbers.
+(Titanic.cabins <- Titanic.df %>%
+    dplyr::select(PassengerId, Subset, Cabin) %>%
+    dplyr::mutate(Cabin.Known = !is.na(Cabin)) %>%
+    dplyr::mutate(
+      Cabin = stringr::str_split(Cabin, pattern = "\\s")
+      ) %>%
+    tidyr::unnest_wider(Cabin, names_sep = ".") %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(
+      Cabin.Count = sum(!is.na(dplyr::c_across(dplyr::num_range("Cabin.", 1:4))))
+      ) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(dplyr::across(
+        dplyr::num_range("Cabin.", 1:4), 
+        list(
+          Deck = ~ stringr::str_extract(.x, ".+?"),
+          Number = ~ stringr::str_extract(.x, "\\d+")
+        ), 
+        .names = "{.col}.{.fn}"
+      )) %>%
+    dplyr::mutate(dplyr::across(
+        dplyr::starts_with("Cabin.") & dplyr::ends_with(".Deck"),
+        ~ factor(.x, levels = c("A", "B", "C", "D", "E", "F", "G"), exclude = NA)
+      )) %>%
+    dplyr::mutate(dplyr::across(
+      dplyr::starts_with("Cabin.") & dplyr::ends_with(".Number"),
+      ~ as.integer(.x)
+    )))
+```
+
+```{r feature-cabin-summary}
+# Overview.
+Titanic.cabins %>% skimr::skim()
+```
+
+#### `Deck` (extracted from `Cabin`)
+
+```{r feature-cabin-summary-combinations-deck-subset}
+# Counts for unique Cabin combinations (by Subset)
+Titanic.cabins %>%
+  dplyr::select(Subset, 
+                make.names_range("Cabin", 1:4, "Deck", sep =".")) %>%
+  dplyr::group_by_all() %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.1.Deck, 
+                 Cabin.2.Deck, 
+                 Cabin.3.Deck, 
+                 Cabin.4.Deck, desc(Subset)) %>% print() %>% visdat::vis_miss()
+```
+
+
+```{r feature-cabin-summary-combinations-deck}
+# Counts for unique Cabin combinations
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Deck", sep =".")) %>%
+  dplyr::group_by_all() %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.1.Deck, 
+                 Cabin.2.Deck, 
+                 Cabin.3.Deck, 
+                 Cabin.4.Deck) %>% print() %>%
+  visdat::vis_miss()
+```
+
+```{r feature-cabin-summary-deck-subset}
+# Counts for Deck counts (by Subset)
+Titanic.cabins %>%
+  dplyr::select(Subset,
+                make.names_range("Cabin", 1:4, "Deck", sep =".")) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.character)) %>%
+  dplyr::mutate(
+    dplyr::across(Cabin.1.Deck, ~ tidyr::replace_na(.x, "?"))) %>%
+  tidyr::pivot_longer(Cabin.1.Deck:Cabin.4.Deck, 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Deck", values_drop_na = TRUE) %>%
+  dplyr::group_by(Subset, Cabin.Deck) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.Deck, desc(Count)) %>% print() %>%
+  dplyr::slice(-c(1:2)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Deck, y = Count, fill = Cabin.Deck)) +
+  ggplot2::geom_bar(stat = "identity") +
+  ggplot2::facet_grid(~Subset) +
+  ggplot2::theme(legend.position = "none")
+```
+
+```{r feature-cabin-summary-deck}
+# Counts for Deck counts
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Deck", sep =".")) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.character)) %>%
+  dplyr::mutate(
+    dplyr::across(Cabin.1.Deck, ~ tidyr::replace_na(.x, "?"))) %>%
+  tidyr::pivot_longer(Cabin.1.Deck:Cabin.4.Deck, 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Deck", values_drop_na = TRUE) %>%
+  dplyr::group_by(Cabin.Deck) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.Deck, desc(Count)) %>%
+  dplyr::slice(-1) %>% print() %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Deck, y = Count, fill = Cabin.Deck)) +
+  ggplot2::geom_bar(stat = "identity") +
+  ggplot2::theme(legend.position = "none")
+```
+
+```{r feature-cabin-summary-deck-missing}
+# Counts for Deck counts
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Deck", sep =".")) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.character)) %>%
+  dplyr::mutate(
+    dplyr::across(Cabin.1.Deck, ~ tidyr::replace_na(.x, "?"))) %>%
+  tidyr::pivot_longer(Cabin.1.Deck:Cabin.4.Deck, 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Deck", values_drop_na = TRUE) %>%
+  dplyr::group_by(Cabin.Deck) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.Deck, desc(Count)) %>% print() %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Deck, y = Count, fill = Cabin.Deck)) +
+  ggplot2::geom_bar(stat = "identity") +
+  ggplot2::theme(legend.position = "none")
+```
+
+
+#### `CabinNumber` (extracted from `Cabin`)
+
+```{r feature-cabin-summary-combinations-number-subset}
+# Counts for unique Cabin combinations (by Subset)
+Titanic.cabins %>%
+  dplyr::select(Subset, 
+                make.names_range("Cabin", 1:4, "Number", sep =".")) %>%
+  dplyr::group_by_all() %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.1.Number, 
+                 Cabin.2.Number, 
+                 Cabin.3.Number, 
+                 Cabin.4.Number, desc(Subset)) %>% print() %>% visdat::vis_miss()
+```
+
+
+```{r feature-cabin-summary-combinations-number}
+# Counts for unique Cabin combinations
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Number", sep =".")) %>%
+  dplyr::group_by_all() %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(desc(Count),
+                 Cabin.1.Number, 
+                 Cabin.2.Number, 
+                 Cabin.3.Number, 
+                 Cabin.4.Number) %>% print() %>%
+  visdat::vis_miss()
+```
+
+```{r feature-cabin-summary-number-subset}
+# Counts for Number counts (by Subset)
+Titanic.cabins %>%
+  dplyr::select(Subset,
+                make.names_range("Cabin", 1:4, "Number", sep =".")) %>%
+  dplyr::mutate(dplyr::across(Cabin.1.Number:Cabin.4.Number, as.integer)) %>%
+  dplyr::mutate(
+    dplyr::across(Cabin.1.Number, ~ tidyr::replace_na(.x, -1))) %>%
+  tidyr::pivot_longer(Cabin.1.Number:Cabin.4.Number, 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Number", values_drop_na = TRUE) %>%
+  dplyr::group_by(Subset, Cabin.Number) %>%
+  dplyr::summarise(Count = dplyr::n(), .groups = "drop") %>%
+  dplyr::arrange(Cabin.Number, desc(Count)) %>% print() %>%
+  dplyr::slice(-c(1:2)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Number, y = Count, fill = Subset)) +
+  ggplot2::geom_histogram(stat = "identity")
+```
+
+```{r feature-cabin-summary-number-histogram}
+# Counts for Number counts
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Number", sep =".")) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.integer)) %>%
+  tidyr::pivot_longer(c(Cabin.1.Number:Cabin.4.Number), 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Number", values_drop_na = TRUE) %>%
+  dplyr::arrange(Cabin.Set) %>% print() %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Set)) +
+  ggplot2::geom_histogram(stat = "count")
+```
+
+```{r feature-cabin-summary-number-missing}
+# Counts for Number counts
+Titanic.cabins %>%
+  dplyr::select(make.names_range("Cabin", 1:4, "Number", sep =".")) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), as.integer)) %>%
+  dplyr::mutate(
+    dplyr::across(Cabin.1.Number, ~ tidyr::replace_na(.x, -1))) %>%
+  tidyr::pivot_longer(c(Cabin.1.Number:Cabin.4.Number), 
+                      names_to = "Cabin.Set", 
+                      values_to = "Cabin.Number", values_drop_na = TRUE) %>%
+  dplyr::arrange(Cabin.Set) %>% print() %>%
+  ggplot2::ggplot(ggplot2::aes(x = Cabin.Set)) +
+  ggplot2::geom_histogram(stat = "count")
+```
+
+
+
 
 ### `TicketPrefix` (extracted from `Ticket`)
 
@@ -280,7 +556,7 @@ Titanic.df %>%
 
 ```{r feature-name}
 # Prepare data frame for extraction from the `Name` feature.
-(Titanic.name <- dplyr::select(Titanic.df, PassengerId, Name, Subset))
+(Titanic.name <- dplyr::select(Titanic.df, PassengerId, Subset, Name))
 ```
 
 ```{r feature-name-explore}

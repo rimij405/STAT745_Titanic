@@ -83,21 +83,17 @@ loadNamespace("randomForest") # For classification.
 loadNamespace("neuralnet")    # For deep learning.
 ```
 
-## Associations
-
-```{r eda-assoc-spearman}
-s <- cor(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train, method = "spearman", exact = FALSE))
-s.p_mat <- ggcorrplot::cor_pmat(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train), method = "spearman", exact = FALSE)
-ggcorrplot::ggcorrplot(corr = s, p.mat = s.p_mat, method = "circle", type = "full", title = "Spearman Correlation")
-```
-
-```{r eda-assoc-kendall}
-s <- cor(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train, method = "pearson", exact = FALSE))
-s.p_mat <- ggcorrplot::cor_pmat(model.matrix(~ 0 + Age + Fare + Pclass + Embarked + Survived + SibSp + Parch, data = Titanic.train), method = "pearson", exact = FALSE)
-ggcorrplot::ggcorrplot(corr = s, p.mat = s.p_mat, method = "circle", type = "full", title = "Pearson Correlation")
-```
-
 ## Data Imputation
+
+### Summary
+
+```{r impute-summary-train}
+Titanic.train %>% naniar::miss_var_summary()
+```
+
+```{r impute-summary-test}
+Titanic.test %>% naniar::miss_var_summary()
+```
 
 ### `Age`
 
